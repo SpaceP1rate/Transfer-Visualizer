@@ -99,6 +99,10 @@ header .meta {
 
 aside {
   overflow-y: auto;
+  /* Never sideways. A panel that scrolls horizontally steals the drag from
+     every slider in it — you reach for the handle and move the whole column.
+     Anything genuinely too wide (the delta-V grid) scrolls inside itself. */
+  overflow-x: hidden;
   background: var(--surface);
   border-right: 1px solid var(--border);
   padding: 14px;
@@ -107,13 +111,22 @@ aside {
   gap: 18px;
 }
 
-main { position: relative; background: var(--page); min-width: 0; min-height: 0; }
+/* `isolation` matters: the body/Lagrange labels are DOM overlays the 3D library
+   stacks at a near-maximum z-index, which would otherwise put them above the
+   bottom sheet. Making main its own stacking context confines them to it. */
+main {
+  position: relative;
+  isolation: isolate;
+  background: var(--page);
+  min-width: 0;
+  min-height: 0;
+}
 
 /* The 3D view must take the gesture, or a one-finger drag scrolls the page
    instead of orbiting the camera. */
 main canvas { touch-action: none; }
 
-.panel { display: flex; flex-direction: column; gap: 9px; }
+.panel { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
 
 .panel > h2 {
   font-size: 10px;
@@ -126,7 +139,7 @@ main canvas { touch-action: none; }
 
 label.field {
   display: grid;
-  grid-template-columns: 92px 1fr;
+  grid-template-columns: 92px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   font-size: 12px;
@@ -160,7 +173,7 @@ input[type="range"] { width: 100%; accent-color: var(--xfer); }
 
 .slider-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
 }
@@ -184,11 +197,13 @@ input[type="range"] { width: 100%; accent-color: var(--xfer); }
 
 .readout {
   position: absolute;
+  z-index: 10;   /* above the scene labels, which are capped at 6 */
   top: 14px;
   right: 14px;
   width: 330px;
   max-height: calc(100% - 28px);
   overflow-y: auto;
+  overflow-x: hidden;
   backdrop-filter: blur(6px);
   background: rgba(26, 26, 25, 0.92);
 }
@@ -265,7 +280,10 @@ hr {
 
 /* --- grid heatmap ------------------------------------------------------- */
 
-.heatwrap { position: relative; }
+/* The grid keeps a legible minimum cell, so on a narrow column it is the one
+   thing wider than the panel. It scrolls on its own axis rather than dragging
+   the whole sidebar sideways with it. */
+.heatwrap { position: relative; overflow-x: auto; overscroll-behavior-x: contain; }
 .heatwrap canvas { display: block; border-radius: 4px; cursor: crosshair; }
 
 .axis-label {
@@ -365,7 +383,9 @@ table.mini td.num { text-align: right; color: var(--ink); }
 .app.compact aside {
   border-right: 0;
   padding: 0 14px 14px;
-  overflow: visible;
+  /* The sheet does the scrolling; the column inside it grows to fit and, as on
+     the desktop, never scrolls sideways. */
+  overflow: hidden;
   background: transparent;
 }
 
@@ -425,6 +445,7 @@ table.mini td.num { text-align: right; color: var(--ink); }
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
@@ -463,8 +484,9 @@ table.mini td.num { text-align: right; color: var(--ink); }
   input[type="range"] { height: 28px; }
 }
 
-/* The heatmap scrolls with the sheet vertically but still takes taps. */
-.heatwrap canvas { touch-action: pan-y; }
+/* The heatmap scrolls with the sheet vertically and inside its own box
+   horizontally; taps land regardless. */
+.heatwrap canvas { touch-action: pan-x pan-y; }
 
 @media (max-width: 700px) {
   header .meta.optional-3 { display: none; }

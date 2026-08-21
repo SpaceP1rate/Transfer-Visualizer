@@ -94,19 +94,25 @@ function Bodies() {
         <sphereGeometry args={[earthRadius ?? 0.0164, 32, 24]} />
         <meshStandardMaterial color="#2b4a7a" roughness={0.9} metalness={0} />
       </mesh>
-      <Html position={[-mu, 0, (earthRadius ?? 0.0164) * 2.4]} center style={labelStyle}>Earth</Html>
+      <Html position={[-mu, 0, (earthRadius ?? 0.0164) * 2.4]} center style={labelStyle} zIndexRange={LABEL_Z}>Earth</Html>
 
       <mesh position={[1 - mu, 0, 0]}>
         <sphereGeometry args={[moonRadius, 24, 18]} />
         <meshStandardMaterial color="#8d8b84" roughness={1} metalness={0} />
       </mesh>
-      <Html position={[1 - mu, 0, moonRadius * 9]} center style={labelStyle}>Moon</Html>
+      <Html position={[1 - mu, 0, moonRadius * 9]} center style={labelStyle} zIndexRange={LABEL_Z}>Moon</Html>
 
       {showLagrange && (
         <>
           <Markers positions={Object.values(L)} color={ink.secondary} size={11} kind="cross" />
           {Object.entries(L).map(([name, p]) => (
-            <Html key={name} position={p} center style={{ ...labelStyle, transform: 'translate(13px,-9px)' }}>
+            <Html
+              key={name}
+              position={p}
+              center
+              style={{ ...labelStyle, transform: 'translate(13px,-9px)' }}
+              zIndexRange={LABEL_Z}
+            >
               {name}
             </Html>
           ))}
@@ -115,6 +121,11 @@ function Bodies() {
     </group>
   );
 }
+
+/* Labels are overlays on the scene, not chrome: they sit above the canvas and
+   below every panel. The library's default range tops out near 2^24, which wins
+   against anything else on the page. */
+const LABEL_Z = [6, 0];
 
 const labelStyle = {
   color: ink.secondary,
@@ -347,6 +358,19 @@ function CameraRig({ target, zoom = 1 }) {
   const { camera } = useThree();
   const controls = useRef();
   const view = useStore((s) => s.view);
+
+  // Map convention on touch: one finger slides the scene, two fingers turn it,
+  // and the pinch inside that two-finger gesture still zooms. Assigned on the
+  // instance rather than passed as a prop — the controls read `touches` live,
+  // and going through the declarative layer leaves the default bindings in
+  // place. The mouse keeps orbit-first bindings, where drag-to-rotate is the
+  // norm and there is a second button for panning.
+  useEffect(() => {
+    const c = controls.current;
+    if (!c) return;
+    c.touches.ONE = THREE.TOUCH.PAN;
+    c.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
+  });
 
   useEffect(() => {
     const v = VIEWS[view] ?? VIEWS['3D'];
