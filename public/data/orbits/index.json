@@ -1,0 +1,445 @@
+{
+  "source": "JPL_cr3bp_orbits.mat",
+  "system": {
+    "name": "Earth-Moon",
+    "mu": 0.01215058560962404,
+    "radiusSecondaryKm": 1737.1,
+    "lunitKm": 389703.2648292776,
+    "tunitS": 382981.2891290545,
+    "vunitKmS": 1.0175517078536909,
+    "moonRadius": 0.004457494090435691,
+    "earthRadiusKm": 6378.137,
+    "earthRadius": 0.016366650155713102
+  },
+  "families": [
+    {
+      "key": "DRO",
+      "label": "Distant Retrograde",
+      "family": "dro",
+      "libr": null,
+      "branch": null,
+      "count": 10998,
+      "file": "DRO.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        1.5410005957354,
+        4.60286512908412
+      ],
+      "periodRange": [
+        0.03517544463121332,
+        6.305215232757937
+      ],
+      "stabilityRange": [
+        1.0,
+        1.0002393302144
+      ],
+      "jacobiCheck": 5.329070518200751e-15
+    },
+    {
+      "key": "L1_Halo",
+      "label": "L1 Halo (north)",
+      "family": "halo",
+      "libr": 1,
+      "branch": "N",
+      "count": 1873,
+      "file": "L1_Halo.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        2.41443112181724,
+        3.17434351933012
+      ],
+      "periodRange": [
+        2.265571149429774,
+        2.977544768475413
+      ],
+      "stabilityRange": [
+        3.00145402500105,
+        1180.40653338576
+      ],
+      "jacobiCheck": 4.884981308350689e-15
+    },
+    {
+      "key": "L1_Lyapunov",
+      "label": "L1 Lyapunov",
+      "family": "lyapunov",
+      "libr": 1,
+      "branch": null,
+      "count": 1209,
+      "file": "L1_Lyapunov.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        2.9863755270294,
+        3.18834111546061
+      ],
+      "periodRange": [
+        2.691579556791744,
+        4.633499424992318
+      ],
+      "stabilityRange": [
+        115.350611401808,
+        1337.71033450654
+      ],
+      "jacobiCheck": 4.884981308350689e-15
+    },
+    {
+      "key": "L1_NRHO",
+      "label": "L1 NRHO (north)",
+      "family": "halo",
+      "libr": 1,
+      "branch": "N",
+      "count": 659,
+      "file": "L1_NRHO.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        2.92178872023433,
+        3.00401542150143
+      ],
+      "periodRange": [
+        1.803672065562651,
+        2.3558524577208266
+      ],
+      "stabilityRange": [
+        1.0,
+        2.9942551838993
+      ],
+      "jacobiCheck": 4.884981308350689e-15
+    },
+    {
+      "key": "L2_Butterfly",
+      "label": "L2 Butterfly (north)",
+      "family": "butterfly",
+      "libr": 2,
+      "branch": "N",
+      "count": 3238,
+      "file": "L2_Butterfly.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        2.74541236091503,
+        3.09106000718193
+      ],
+      "periodRange": [
+        2.7486551970631994,
+        11.555291205753774
+      ],
+      "stabilityRange": [
+        1.0,
+        211.184678346281
+      ],
+      "jacobiCheck": 4.884981308350689e-15
+    },
+    {
+      "key": "L2_Halo",
+      "label": "L2 Halo (north)",
+      "family": "halo",
+      "libr": 2,
+      "branch": "N",
+      "count": 828,
+      "file": "L2_Halo.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        3.01604024047133,
+        3.15211885653673
+      ],
+      "periodRange": [
+        2.5149552135095727,
+        3.4155308065628454
+      ],
+      "stabilityRange": [
+        3.03257420914057,
+        606.11248638188
+      ],
+      "jacobiCheck": 4.884981308350689e-15
+    },
+    {
+      "key": "L2_Lyapunov",
+      "label": "L2 Lyapunov",
+      "family": "lyapunov",
+      "libr": 2,
+      "branch": null,
+      "count": 1399,
+      "file": "L2_Lyapunov.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        2.99121003974016,
+        3.17216041794078
+      ],
+      "periodRange": [
+        3.3732582162214264,
+        4.720502630478375
+      ],
+      "stabilityRange": [
+        94.3080872105922,
+        726.776225649051
+      ],
+      "jacobiCheck": 4.884981308350689e-15
+    },
+    {
+      "key": "L2_NRHO",
+      "label": "L2 NRHO (north)",
+      "family": "halo",
+      "libr": 2,
+      "branch": "N",
+      "count": 707,
+      "file": "L2_NRHO.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        3.01517767456737,
+        3.15844451715308
+      ],
+      "periodRange": [
+        0.7191707018171736,
+        2.512290419458458
+      ],
+      "stabilityRange": [
+        1.0,
+        2.98055450870395
+      ],
+      "jacobiCheck": 4.884981308350689e-15
+    },
+    {
+      "key": "L4_Long",
+      "label": "L4 Long-period",
+      "family": "longp",
+      "libr": 4,
+      "branch": null,
+      "count": 4703,
+      "file": "L4_Long.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        2.71168672424199,
+        2.99796102880382
+      ],
+      "periodRange": [
+        21.069795860362103,
+        26.223218166582974
+      ],
+      "stabilityRange": [
+        1.0,
+        61.9927731274966
+      ],
+      "jacobiCheck": 5.329070518200751e-15
+    },
+    {
+      "key": "L4_Short",
+      "label": "L4 Short-period",
+      "family": "short",
+      "libr": 4,
+      "branch": null,
+      "count": 6999,
+      "file": "L4_Short.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        2.0181025145306,
+        2.98799705010891
+      ],
+      "periodRange": [
+        6.285834624425885,
+        6.582692158298978
+      ],
+      "stabilityRange": [
+        1.0,
+        1.00000000000423
+      ],
+      "jacobiCheck": 5.329070518200751e-15
+    },
+    {
+      "key": "L5_Long",
+      "label": "L5 Long-period",
+      "family": "longp",
+      "libr": 5,
+      "branch": null,
+      "count": 4703,
+      "file": "L5_Long.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        2.71168672424199,
+        2.99796102880382
+      ],
+      "periodRange": [
+        21.069795860362103,
+        26.223218166582974
+      ],
+      "stabilityRange": [
+        1.0,
+        61.992772707153
+      ],
+      "jacobiCheck": 5.329070518200751e-15
+    },
+    {
+      "key": "L5_Short",
+      "label": "L5 Short-period",
+      "family": "short",
+      "libr": 5,
+      "branch": null,
+      "count": 6999,
+      "file": "L5_Short.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        2.01810251396845,
+        2.98799705010924
+      ],
+      "periodRange": [
+        6.285834624363579,
+        6.582692151858179
+      ],
+      "stabilityRange": [
+        1.0,
+        1.000000000012
+      ],
+      "jacobiCheck": 5.329070518200751e-15
+    },
+    {
+      "key": "Resonant_21",
+      "label": "Resonant 2:1",
+      "family": "resonant",
+      "libr": null,
+      "branch": null,
+      "count": 7467,
+      "file": "Resonant_21.f64",
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "jacobi",
+        "period",
+        "stability"
+      ],
+      "jacobiRange": [
+        2.39332373938576,
+        3.17219461865408
+      ],
+      "periodRange": [
+        5.886850477233688,
+        6.296463135408091
+      ],
+      "stabilityRange": [
+        1.0,
+        1.00003161032398
+      ],
+      "jacobiCheck": 4.884981308350689e-15
+    }
+  ]
+}

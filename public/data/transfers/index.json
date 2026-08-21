@@ -1,0 +1,31 @@
+{
+  "generated": "2026-08-21T01:40:29.848Z",
+  "pairs": [
+    {
+      "key": "L1_Halo_to_L2_Lyapunov",
+      "label": "L1 Halo → L2 Lyapunov",
+      "depFamily": "L1_Halo",
+      "arrFamily": "L2_Lyapunov",
+      "orbitsFile": null,
+      "impulses": [
+        {
+          "n": 2,
+          "files": [
+            "L1_Halo_to_L2_Lyapunov_DEMO/n2/transfers_L1_Halo_to_L2_Lyapunov_n2.csv"
+          ],
+          "rows": 900,
+          "lunarInvalid": 22,
+          "tofRange": [
+            0.421044338489,
+            2.9893990464
+          ],
+          "dvRange": [
+            0.18417632028,
+            1.34245428837
+          ],
+          "maxResidual": 9.945834385e-12
+        }
+      ]
+    }
+  ]
+}

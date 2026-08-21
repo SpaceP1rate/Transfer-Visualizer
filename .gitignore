@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# Local scratch
+shot*.mjs
+net.mjs
+
+# Full solver exports are read from disk via the folder picker, never committed.
+edges_*/
+site_data/
+
+# MATLAB sources stay with the research code. The catalog is committed only in
+# its converted form (public/data/orbits); edge_*.mat cannot be read outside
+# MATLAB anyway — see scripts/export_edges.m.
+*.mat
+
+# Scratch: device_bash cannot delete, so discards land here.
+_to_delete/
