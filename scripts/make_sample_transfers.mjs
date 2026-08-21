@@ -27,7 +27,7 @@ import { makeDerivs, makeDerivsSTM, integrate, moonDistance } from '../src/lib/c
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STUDY = path.join(ROOT, 'public', 'data', 'study');
-const OUT = path.join(ROOT, 'public', 'data', 'transfers');
+const OUT = path.join(ROOT, 'public', 'data', 'solutions');
 
 const MU = 0.01215058560962404;
 const R_MOON = 1737.4 / 384400; // the MATLAB run's lunar radius, in its own LU

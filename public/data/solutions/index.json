@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-21T01:40:29.848Z",
+  "generated": "2026-08-21T02:47:12.082Z",
   "pairs": [
     {
       "key": "L1_Halo_to_L2_Lyapunov",
@@ -7,6 +7,7 @@
       "depFamily": "L1_Halo",
       "arrFamily": "L2_Lyapunov",
       "orbitsFile": null,
+      "matFiles": [],
       "impulses": [
         {
           "n": 2,

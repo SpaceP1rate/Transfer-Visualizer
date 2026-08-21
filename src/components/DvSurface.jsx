@@ -154,6 +154,8 @@ export default function DvSurface() {
             setHover({ ...c, v, x: e.clientX, y: e.clientY });
           }}
           onMouseLeave={() => setHover(null)}
+          onPointerLeave={() => setHover(null)}
+          onBlur={() => setHover(null)}
           onClick={(e) => {
             const c = toCell(e);
             if (c) setState({ depIdx: c.dep, arrIdx: c.arr, rank: 1 });

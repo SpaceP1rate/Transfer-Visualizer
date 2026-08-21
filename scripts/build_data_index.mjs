@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Index whatever transfer CSVs are committed under public/data/transfers and
- * write the manifest the site loads.
+ * Index the solve folders committed under public/data/solutions and write the
+ * manifest the site loads. The site reads nothing else: every trajectory it draws
+ * comes from a file in this folder.
  *
  * Folder conventions live in src/lib/layout.js and are shared with the browser
  * folder picker, so a layout that works here works when the same folder is
@@ -19,7 +20,7 @@ import { groupFiles } from '../src/lib/layout.js';
 import { parseTransfersCsv } from '../src/lib/csv.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DIR = path.join(ROOT, 'public', 'data', 'transfers');
+const DIR = path.join(ROOT, 'public', 'data', 'solutions');
 
 const range = (xs) => (xs.length ? [Math.min(...xs), Math.max(...xs)] : null);
 
@@ -34,7 +35,7 @@ async function walk(dir, prefix = '', depth = 0, out = []) {
 }
 
 if (!existsSync(DIR)) {
-  console.log('no public/data/transfers yet — nothing to index');
+  console.log('no public/data/solutions yet — nothing to index');
   process.exit(0);
 }
 
@@ -78,5 +79,5 @@ let bytes = 0;
 for (const p of paths) bytes += (await stat(path.join(DIR, p))).size;
 
 await writeFile(path.join(DIR, 'index.json'), JSON.stringify(out, null, 2));
-console.log(`\nwrote data/transfers/index.json: ${out.pairs.length} pair(s), ${(bytes / 1e6).toFixed(1)} MB of CSV`);
+console.log(`\nwrote data/solutions/index.json: ${out.pairs.length} solve folder(s), ${(bytes / 1e6).toFixed(1)} MB`);
 if (ignored.length) console.log(`  ignored ${ignored.length} unrecognised file(s), e.g. ${ignored[0]}`);

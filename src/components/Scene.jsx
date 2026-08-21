@@ -14,6 +14,58 @@ import { ink, series, status, ramp } from '../theme.js';
  * stationary. Z is the angular-velocity axis, so the camera's up vector is Z.
  */
 
+/**
+ * A soft dot with a dark rim, drawn once and reused. Point sprites keep markers
+ * at a fixed pixel size no matter how far the camera is, which is what a marker
+ * should do — a world-sized sphere is invisible when zoomed out and swallows the
+ * trajectory when zoomed in.
+ */
+function makeDotTexture() {
+  const S = 64;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, S, S);
+  g.beginPath();
+  g.arc(S / 2, S / 2, S * 0.42, 0, Math.PI * 2);
+  g.fillStyle = ink.page;
+  g.fill();
+  g.beginPath();
+  g.arc(S / 2, S / 2, S * 0.30, 0, Math.PI * 2);
+  g.fillStyle = '#ffffff';
+  g.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+let dotTexture = null;
+const getDot = () => (dotTexture ??= makeDotTexture());
+
+/** Fixed-pixel-size markers at a list of positions. */
+function Markers({ positions, color, size = 7, depthTest = true }) {
+  const geom = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions.flat(), 3));
+    return g;
+  }, [positions]);
+  useEffect(() => () => geom.dispose(), [geom]);
+  if (!positions.length) return null;
+  return (
+    <points geometry={geom}>
+      <pointsMaterial
+        map={getDot()}
+        color={color}
+        size={size}
+        sizeAttenuation={false}
+        transparent
+        alphaTest={0.35}
+        depthTest={depthTest}
+      />
+    </points>
+  );
+}
+
 function Bodies() {
   const system = useStore((s) => s.system);
   const showLagrange = useStore((s) => s.showLagrange);
@@ -35,15 +87,16 @@ function Bodies() {
       </mesh>
       <Html position={[1 - mu, 0, moonRadius * 9]} center style={labelStyle}>Moon</Html>
 
-      {showLagrange && Object.entries(L).map(([name, p]) => (
-        <group key={name} position={p}>
-          <mesh>
-            <sphereGeometry args={[0.0045, 12, 10]} />
-            <meshBasicMaterial color={ink.secondary} />
-          </mesh>
-          <Html center style={{ ...labelStyle, transform: 'translate(14px,-10px)' }}>{name}</Html>
-        </group>
-      ))}
+      {showLagrange && (
+        <>
+          <Markers positions={Object.values(L)} color={ink.secondary} size={6} />
+          {Object.entries(L).map(([name, p]) => (
+            <Html key={name} position={p} center style={{ ...labelStyle, transform: 'translate(13px,-9px)' }}>
+              {name}
+            </Html>
+          ))}
+        </>
+      )}
     </group>
   );
 }
@@ -108,7 +161,7 @@ function ReferenceGrid() {
  * A whole family drawn as one LineSegments, coloured by Jacobi constant along
  * the sequential ramp. One draw call regardless of how many members are shown.
  */
-function FamilySweep({ familyKey, count }) {
+function FamilySweep({ familyKey, count, opacity = 0.42 }) {
   const fam = useStore((s) => s.families.get(familyKey));
   const [data] = useAsync(() => {
     if (!fam) return null;
@@ -138,7 +191,7 @@ function FamilySweep({ familyKey, count }) {
   if (!geom) return null;
   return (
     <lineSegments geometry={geom}>
-      <lineBasicMaterial vertexColors transparent opacity={0.42} />
+      <lineBasicMaterial vertexColors transparent opacity={opacity} />
     </lineSegments>
   );
 }
@@ -155,16 +208,17 @@ function PeriodicOrbit({ orbit, color, opacity = 1, width = 2 }) {
 }
 
 /** One reconstructed transfer: coast arcs plus a marker at every impulse. */
-function Transfer({ dep, arr, row, color, dashed = false, showImpulses = true, channel, closeArc = false }) {
+function Transfer({ dep, arr, row, color, dashed = false, showImpulses = true, channel }) {
+  // Every arc drawn here is an exact solution: the departure and arrival phases
+  // are solved for so the trajectory truly connects the two orbits, rather than
+  // trusting the exported labels, which carry a sub-cell reporting offset.
   const [data] = useAsync(() => {
     if (!dep || !arr || !row) return null;
     const d = { ic: Array.from(dep.ic), period: dep.period };
     const a = { ic: Array.from(arr.ic), period: arr.period };
-    if (!closeArc) return transferAsync(d, a, row, 340, channel);
-    // Solve for the phases that close the arc first, then draw that trajectory.
     return fitPhasesAsync(d, a, row, 360, `${channel}:fit`)
       .then((fit) => transferAsync(d, a, row, 340, channel, fit));
-  }, [dep?.id, arr?.id, row, channel, closeArc]);
+  }, [dep?.id, arr?.id, row, channel]);
 
   const legs = useMemo(() => (data ? data.legs.map((l) => toPoints(l.positions)) : []), [data]);
   if (!data) return null;
@@ -184,20 +238,14 @@ function Transfer({ dep, arr, row, color, dashed = false, showImpulses = true, c
           opacity={dashed ? 0.85 : 1}
         />
       ))}
-      {showImpulses && data.impulses.map((im) => (
-        <group key={im.index} position={im.position}>
-          {/* A surface-coloured ring keeps the marker readable where it sits on
-              top of the arc it belongs to. */}
-          <mesh>
-            <sphereGeometry args={[0.0075, 14, 12]} />
-            <meshBasicMaterial color={ink.surface} />
-          </mesh>
-          <mesh>
-            <sphereGeometry args={[0.0052, 14, 12]} />
-            <meshBasicMaterial color={im.mag < 1e-6 ? ink.muted : ink.primary} />
-          </mesh>
-        </group>
-      ))}
+      {showImpulses && (
+        <Markers
+          positions={data.impulses.map((im) => im.position)}
+          color={ink.primary}
+          size={8}
+          depthTest={false}
+        />
+      )}
     </group>
   );
 }
@@ -214,7 +262,7 @@ export const VIEWS = {
   'YZ': { pos: [1.75, 0, 0], up: [0, 0, 1] },
 };
 
-function CameraRig({ target }) {
+function CameraRig({ target, zoom = 1 }) {
   const { camera } = useThree();
   const controls = useRef();
   const view = useStore((s) => s.view);
@@ -222,12 +270,17 @@ function CameraRig({ target }) {
   useEffect(() => {
     const v = VIEWS[view] ?? VIEWS['3D'];
     // Presets are offsets from the framing target, so switching view keeps
-    // whatever the user is looking at centred.
+    // whatever the user is looking at centred. `zoom` widens the framing when
+    // the scene is the whole catalog rather than a single transfer.
     camera.up.set(...v.up);
-    camera.position.set(target.x + v.pos[0], target.y + v.pos[1], target.z + v.pos[2]);
+    camera.position.set(
+      target.x + v.pos[0] * zoom,
+      target.y + v.pos[1] * zoom,
+      target.z + v.pos[2] * zoom
+    );
     camera.lookAt(target);
     controls.current?.update();
-  }, [view, camera, target]);
+  }, [view, camera, target, zoom]);
 
   return (
     <OrbitControls
@@ -257,8 +310,9 @@ export default function Scene() {
   const nImpulse = useStore((s) => s.nImpulse);
   const compareWith = useStore((s) => s.compareWith);
   const rank = useStore((s) => s.rank);
-  const closeArc = useStore((s) => s.closeArc);
   const hideLunarInvalid = useStore((s) => s.hideLunarInvalid);
+  const allFamilies = useStore((s) => s.allFamilies);
+  const hasSolutions = useStore((s) => s.pairs.length > 0);
   const pairData = useStore((s) => s.pairData);
 
   const { depOrbit, arrOrbit, row, compareRow } = useMemo(() => {
@@ -274,10 +328,19 @@ export default function Scene() {
     };
   }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, compareWith, rank, hideLunarInvalid]);
 
+  // With a transfer selected the interesting region is the Earth-Moon corridor;
+  // with the whole catalog on screen it is the entire system, including the
+  // L4/L5 families that reach out to |r| ~ 1.
   const target = useMemo(
-    () => new THREE.Vector3(system ? 1 - system.mu - 0.08 : 0.9, 0, 0),
-    [system]
+    () => (hasSolutions ? new THREE.Vector3(system ? 1 - system.mu - 0.08 : 0.9, 0, 0)
+      : new THREE.Vector3(0, 0, 0)),
+    [system, hasSolutions]
   );
+  const zoom = hasSolutions ? 1 : 2.3;
+
+  // 13 families at full resolution is an unreadable thicket; thin them and let
+  // the member slider bring detail back on demand.
+  const catalogSweepCount = Math.min(40, Math.max(12, Math.round(sweepCount / 3)));
 
   if (!system) return null;
 
@@ -294,10 +357,15 @@ export default function Scene() {
       {showGrid && <ReferenceGrid />}
       <Bodies />
 
-      {showSweep && depFamily && <FamilySweep familyKey={depFamily} count={sweepCount} />}
-      {showSweep && arrFamily && arrFamily !== depFamily && (
-        <FamilySweep familyKey={arrFamily} count={sweepCount} />
-      )}
+      {showSweep && (hasSolutions
+        // With solutions loaded, only the two families in play are drawn.
+        ? [depFamily, arrFamily]
+          .filter((k, i, a) => k && a.indexOf(k) === i)
+          .map((k) => <FamilySweep key={k} familyKey={k} count={sweepCount} />)
+        // Nothing committed: show the whole catalog, thinned so it stays legible.
+        : allFamilies.map((k) => (
+          <FamilySweep key={k} familyKey={k} count={catalogSweepCount} opacity={0.3} />
+        )))}
 
       <PeriodicOrbit orbit={depOrbit} color={series.departure} />
       <PeriodicOrbit orbit={arrOrbit} color={series.arrival} />
@@ -313,11 +381,10 @@ export default function Scene() {
           dep={depOrbit} arr={arrOrbit} row={row}
           color={row.lunar_valid === false ? status.critical : series.transfer}
           channel="primary"
-          closeArc={closeArc}
         />
       )}
 
-      <CameraRig target={target} />
+      <CameraRig target={target} zoom={zoom} />
       <GizmoHelper alignment="bottom-left" margin={[68, 68]}>
         <GizmoViewport axisColors={['#d95926', '#199e70', '#3987e5']} labelColor="#ffffff" />
       </GizmoHelper>

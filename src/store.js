@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { openCatalog } from './lib/catalog.js';
 import { parseTransfersCsv, parseOrbitsCsv } from './lib/csv.js';
 import { shareFamily, setMu, parseEdgeMatAsync, poolSize } from './lib/propagator-client.js';
-import { RemoteSource } from './lib/source.js';
+import { SolutionsSource } from './lib/source.js';
 
 const BASE = import.meta.env.BASE_URL ?? './';
 export const url = (p) => `${BASE}${p}`.replace(/([^:])\/{2,}/g, '$1/');
@@ -86,6 +86,35 @@ function derivePairData(rowsByN, orbitsCsv, studyDoc) {
   return { depIds, arrIds, slices, orbits, missing, icSource, lookup };
 }
 
+/**
+ * A solve folder may be named for a variant of a run ("..._DEMO", "_v2"), so
+ * match it back to the catalog sampling by exact key, then key prefix, then the
+ * family names it implies.
+ */
+function matchStudy(entry, studyIndex) {
+  const study = studyIndex?.pairs ?? [];
+  return (
+    study.find((s) => s.key === entry.key) ??
+    study.find((s) => entry.key.startsWith(`${s.key}_`)) ??
+    (entry.depFamily && entry.arrFamily
+      ? study.find((s) => s.depFamily === entry.depFamily && s.arrFamily === entry.arrFamily)
+      : null) ??
+    null
+  );
+}
+
+/** Borrow the catalog sampling's label and family keys for a solve folder. */
+function decorate(p, studyIndex) {
+  const s = matchStudy(p, studyIndex);
+  const tag = s && p.key !== s.key ? p.key.slice(s.key.length + 1).replace(/_/g, ' ') : '';
+  return {
+    ...p,
+    label: s ? `${s.label}${tag ? ` · ${tag}` : ''}` : p.label,
+    depFamily: s?.depFamily ?? p.depFamily,
+    arrFamily: s?.arrFamily ?? p.arrFamily,
+  };
+}
+
 export const useStore = create((set, get) => ({
   phase: 'loading',
   error: null,
@@ -113,12 +142,12 @@ export const useStore = create((set, get) => ({
   rank: 1,
   hideLunarInvalid: true,
 
-  closeArc: false,   // fit the phases so the arc actually reaches the arrival orbit
   view: '3D',
   showSweep: true,
   showGrid: true,
   showLagrange: true,
   sweepCount: 70,
+  allFamilies: [],     // every catalog family, shown when no solutions are committed
   followSelection: true,
 
   // ------------------------------------------------------------------------
@@ -127,63 +156,26 @@ export const useStore = create((set, get) => ({
       const cat = await openCatalog(url('data/orbits'));
       await setMu(cat.system.mu);
 
-      let studyIndex = null, source = null;
+      let studyIndex = null;
       try { studyIndex = await getJson('data/study/index.json'); } catch { /* optional */ }
-      try { source = await RemoteSource.open(url('data/transfers')); } catch { /* optional */ }
+      const source = await SolutionsSource.open(url('data/solutions'));
 
-      set({ phase: 'ready', system: cat.system, catalog: cat, studyIndex, source });
-      const pairs = get().buildPairs();
-      if (!pairs.length) throw new Error('no transfer or study data found under data/');
-      await get().loadPair(pairs[0].key);
+      const allFamilies = cat.manifest.families.map((f) => f.key);
+      const pairs = (source?.listPairs() ?? []).map((p) => decorate(p, studyIndex));
+
+      set({
+        phase: 'ready', system: cat.system, catalog: cat, studyIndex, source, pairs, allFamilies,
+      });
+
+      if (pairs.length) {
+        await get().loadPair(pairs[0].key);
+      } else {
+        // Nothing committed yet: show the whole catalog instead of an empty scene.
+        await Promise.all(allFamilies.map((k) => get().ensureFamily(k)));
+      }
     } catch (e) {
       set({ phase: 'error', error: String(e?.message ?? e) });
     }
-  },
-
-  /**
-   * A pair is showable if the active source has solutions for it, or — geometry
-   * only — if the catalog sampling knows about it.
-   */
-  buildPairs() {
-    const { source, studyIndex } = get();
-    const study = studyIndex?.pairs ?? [];
-
-    // A solver folder may be named for a variant of a run ("..._DEMO", "_v2"),
-    // so match it back to the catalog sampling by key prefix or by family names
-    // and borrow that entry's label and families.
-    const matchStudy = (p) =>
-      study.find((s) => s.key === p.key) ??
-      study.find((s) => p.key.startsWith(`${s.key}_`)) ??
-      study.find((s) => s.depFamily === p.depFamily && s.arrFamily === p.arrFamily) ??
-      null;
-
-    const pairs = [];
-    const covered = new Set();
-    for (const p of source?.listPairs() ?? []) {
-      const s = matchStudy(p);
-      if (s) covered.add(s.key);
-      const tag = s && p.key !== s.key ? p.key.slice(s.key.length + 1).replace(/_/g, ' ') : '';
-      pairs.push({
-        ...p,
-        hasTransfers: true,
-        label: s ? `${s.label}${tag ? ` · ${tag}` : ''}` : p.label,
-        depFamily: s?.depFamily ?? p.depFamily,
-        arrFamily: s?.arrFamily ?? p.arrFamily,
-      });
-    }
-    for (const s of study) {
-      if (!covered.has(s.key)) pairs.push({ ...s, hasTransfers: false });
-    }
-    set({ pairs });
-    return pairs;
-  },
-
-  /** Swap in a folder chosen from disk, or back to the repository data. */
-  async setSource(source) {
-    set({ source, sourceError: null });
-    const pairs = get().buildPairs();
-    const keep = pairs.find((p) => p.key === get().pairKey) ?? pairs[0];
-    if (keep) await get().loadPair(keep.key);
   },
 
   async ensureFamily(key) {
@@ -203,16 +195,7 @@ export const useStore = create((set, get) => ({
     if (!entry) return;
     set({ pairKey, loading: true, sourceError: null });
 
-    // Match the catalog sampling to this pair. Exact key first, then a key with
-    // a trailing tag stripped (e.g. "..._DEMO"), then the family names — so a
-    // folder named for a variant of a run still resolves its orbits.
-    const [entryDep, entryArr] = [entry.depFamily, entry.arrFamily];
-    const studyEntry =
-      studyIndex?.pairs?.find((p) => p.key === pairKey) ??
-      studyIndex?.pairs?.find((p) => pairKey.startsWith(`${p.key}_`)) ??
-      (entryDep && entryArr
-        ? studyIndex?.pairs?.find((p) => p.depFamily === entryDep && p.arrFamily === entryArr)
-        : null);
+    const studyEntry = matchStudy(entry, studyIndex);
     const studyDoc = studyEntry ? await getJson(`data/study/${studyEntry.file}`) : null;
 
     let orbitsCsv = null;
@@ -226,14 +209,14 @@ export const useStore = create((set, get) => ({
     };
 
     try {
-      if (entry.hasTransfers && source) {
+      if (source) {
         if (entry.orbitsFile) {
-          orbitsCsv = parseOrbitsCsv(await source.readText(pairKey, entry.orbitsFile));
+          orbitsCsv = parseOrbitsCsv(await source.readText(entry.orbitsFile));
         }
         for (const variant of entry.impulses ?? []) {
           let rows = [];
           for (const file of variant.files) {
-            rows = rows.concat(parseTransfersCsv(await source.readText(pairKey, file)));
+            rows = rows.concat(parseTransfersCsv(await source.readText(file)));
           }
           if (rows.length) rowsByN.set(variant.n, rows);
         }
@@ -253,7 +236,7 @@ export const useStore = create((set, get) => ({
             while (cursor < mats.length) {
               const path = mats[cursor++];
               try {
-                const buf = await source.readBinary(pairKey, path);
+                const buf = await source.readBinary(path);
                 const res = await parseEdgeMatAsync(buf, path);
                 if (res.ok) addRows(res.rows);
                 else errors.push(`${path}: ${res.error}`);

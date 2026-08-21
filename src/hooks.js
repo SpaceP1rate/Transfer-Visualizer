@@ -15,8 +15,11 @@ export function useAsync(producer, deps, initial = null) {
   useEffect(() => {
     const mine = ++seq.current;
     let cancelled = false;
+    // Clear first: holding the previous result while the new one is in flight
+    // leaves stale geometry on screen after the selection changes.
+    setValue(initial);
     const run = producer();
-    if (!run) { setValue(initial); return; }
+    if (!run) return;
     setPending(true);
     Promise.resolve(run)
       .then((v) => { if (!cancelled && mine === seq.current) setValue(v); })

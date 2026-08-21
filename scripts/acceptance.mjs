@@ -196,9 +196,9 @@ for (const key of STUDY) {
 
 // --- 10. transfer closure ---------------------------------------------------
 console.log('');
-const TDIR = path.join(ROOT, 'public', 'data', 'transfers');
+const TDIR = path.join(ROOT, 'public', 'data', 'solutions');
 if (!existsSync(TDIR)) {
-  console.log('  ....  transfer closure skipped: public/data/transfers not present yet');
+  console.log('  ....  transfer closure skipped: public/data/solutions not present yet');
 } else {
   // Initial conditions come from the pair's orbits CSV when it has one, and
   // otherwise from the catalog sampling the study used — the same fallback the

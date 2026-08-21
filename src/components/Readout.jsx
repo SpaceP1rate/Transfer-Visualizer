@@ -165,16 +165,10 @@ export default function Readout() {
           {fit && (
             <>
               <Row
-                k="Reconstruction gap"
-                v={km(fit.gapBefore)}
-                sub={fit.gapBefore.toExponential(1)}
-                tone={fit.gapBefore > 1e-4 ? status.warning : undefined}
-              />
-              <Row
-                k="…after fitting phases"
+                k="Endpoint match"
                 v={km(fit.gapAfter)}
                 sub={fit.gapAfter.toExponential(1)}
-                tone={fit.gapAfter < 1e-6 ? status.good : undefined}
+                tone={fit.gapAfter < 1e-6 ? status.good : status.warning}
               />
               <Row
                 k="Phase correction"

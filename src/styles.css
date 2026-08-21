@@ -33,7 +33,7 @@ body {
 .app {
   display: grid;
   grid-template-columns: 360px 1fr;
-  grid-template-rows: 48px 1fr;
+  grid-template-rows: 64px 1fr;
   height: 100%;
 }
 
@@ -47,12 +47,26 @@ header {
   border-bottom: 1px solid var(--border);
 }
 
-header h1 {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  margin: 0;
+header .brand {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   white-space: nowrap;
+}
+
+header h1 {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.012em;
+  line-height: 1.1;
+  margin: 0;
+}
+
+header .byline {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 header .spacer { flex: 1; }
@@ -148,7 +162,7 @@ input[type="range"] { width: 100%; accent-color: var(--xfer); }
   position: absolute;
   top: 14px;
   right: 14px;
-  width: 312px;
+  width: 330px;
   max-height: calc(100% - 28px);
   overflow-y: auto;
   backdrop-filter: blur(6px);
@@ -164,8 +178,9 @@ input[type="range"] { width: 100%; accent-color: var(--xfer); }
   font-size: 12px;
 }
 
-.stat-row .k { color: var(--muted); }
+.stat-row .k { color: var(--muted); flex: 0 1 auto; min-width: 0; }
 .stat-row .v { font-variant-numeric: tabular-nums; color: var(--ink); text-align: right; }
+.stat-row .v { flex: 0 0 auto; white-space: nowrap; }
 .stat-row .v small { color: var(--muted); font-size: 11px; margin-left: 5px; }
 
 .hero {
@@ -269,6 +284,7 @@ hr {
 }
 
 .notice b { color: var(--ink); font-weight: 600; }
+.notice code { color: var(--ink-2); background: rgba(255,255,255,0.06); padding: 0 3px; border-radius: 3px; font-size: 11px; }
 
 .centered {
   display: grid;

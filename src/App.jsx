@@ -32,11 +32,17 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>CR3BP Transfer Visualizer</h1>
+        <div className="brand">
+          <h1>CR3BP Transfer Visualizer</h1>
+          <span className="byline">A. Hakobyan</span>
+        </div>
         <span className="meta">Earth–Moon · synodic frame · nondimensional</span>
         <span className="spacer" />
         {pairData?.icSource === 'catalog' && (
-          <span className="meta" title="No orbits CSV was supplied, so initial conditions were resolved from the JPL catalog snapshot using the study's own sampling rule.">
+          <span
+            className="meta"
+            title="No orbits CSV was supplied with this solve folder, so initial conditions were resolved from the JPL catalog snapshot using the study's own sampling rule."
+          >
             ICs from catalog
           </span>
         )}

@@ -1,8 +1,14 @@
 # Transfer Visualizer
 
-Web visualization for periodic orbits and impulsive transfer trajectories in the
-Earth–Moon circular restricted three-body problem (CR3BP). Fully static, no
-backend, deployable to GitHub Pages.
+**A. Hakobyan**
+
+An exact-solution viewer for periodic orbits and impulsive transfer trajectories
+in the Earth–Moon circular restricted three-body problem (CR3BP). Fully static,
+no backend, deployable to GitHub Pages.
+
+Everything the site draws comes from a solve folder committed under
+`public/data/solutions/`. There is no upload path and no local-folder path: a
+link to the site and a link to the commit describe the same thing.
 
 Neither data source stores drawable geometry: the orbit catalog gives an initial
 state and a period, the solver exports give phases, burn vectors and coast
@@ -88,31 +94,32 @@ export_edges('edges_L1_Halo_to_L2_Halo', 'site_data')
 
 ---
 
-## Two ways to supply solution data
+## Supplying solutions
 
-**Committed to the repo** — put CSVs under `public/data/transfers/` and run
-`node scripts/build_data_index.mjs`. Small, shareable, works on a cold link.
+Put a solve folder under `public/data/solutions/` and run
+`node scripts/build_data_index.mjs`. That walks the directory, validates what it
+finds, and writes the manifest the site loads. The solution dropdown lists
+exactly those folders and nothing else; when the directory is empty the site says
+so and falls back to drawing all thirteen catalog families.
 
-**A folder on your disk** — use *Data source → Choose folder* in the sidebar.
-The browser reads the files directly; nothing is uploaded and nothing is
-committed, so a full multistart export that would never fit in a repository can
-still be explored. This also accepts the solver's own `edges_*/edge_*.mat`
-folders — no MATLAB export step (see below).
-
-Both paths use the same layout rules (`src/lib/layout.js`), so a folder that
-works one way works the other:
+Recognised layouts (`src/lib/layout.js`):
 
 ```
-<pair>/orbits*.csv                    initial conditions for the run (optional)
-<pair>/n<k>/*.csv                     k-impulse solutions
-<pair>/transfers*_n<k>.csv            the same, flat
-transfers_<DEP>_to_<ARR>_n<k>.csv     flat at the root
-edges_<DEP>_to_<ARR>/edge_*.mat       the solver's raw output
+public/data/solutions/
+  <pair>/orbits*.csv                    initial conditions for the run (optional)
+  <pair>/n<k>/*.csv                     k-impulse solutions
+  <pair>/transfers*_n<k>.csv            the same, flat
+  transfers_<DEP>_to_<ARR>_n<k>.csv     flat at the root
+  edges_<DEP>_to_<ARR>/edge_*.mat       the solver's raw output, read as-is
 ```
 
 The **impulse count is never hardcoded**. The reader discovers how many `dvN_*`
 and `t_legN` columns a file actually has, and the selector is built from the
 `n<k>` folders present, so a 4- or 5-impulse export drops in with no code change.
+
+`edge_*.mat` files are read directly in the browser (see below), which skips the
+MATLAB export step — but a full run is of order a million rows per family pair,
+so `scripts/export_edges.m` is the practical route for anything committed.
 
 ### CSV columns
 
@@ -132,15 +139,16 @@ MATLAB `edge_table` names are accepted:
 If no `orbits*.csv` is supplied, initial conditions are resolved by label
 (`L1_Halo_07`) from the catalog, reproducing `sample_family` exactly — mask on
 `C ∈ [C_min, C_max]` in catalog order, then `round(linspace(1, n_total, 10))`.
-The header shows *ICs from catalog* when that fallback is in use.
+The header shows *ICs from catalog* when that fallback is in use. Verified
+against a solver file's own stored `C_dep` / `C_arr`: they agree to 4e-15.
 
 ---
 
 ## Reading .mat without MATLAB
 
-The site reads MATLAB v5/v7 files directly, so a folder of `edge_*.mat` works
-without `export_edges.m` and without a Python step. Two things make that harder
-than it sounds.
+The site reads MATLAB v5/v7 files directly, so a solve folder of `edge_*.mat`
+works without `export_edges.m` and without a Python step. Two things make that
+harder than it sounds.
 
 **Element padding.** Every MAT data element is padded to an 8-byte boundary
 *except* `miCOMPRESSED`, which is written back-to-back. Pad it anyway and the
@@ -160,9 +168,6 @@ A pairing file is ~22k solutions and about 1.8 MB, which decompresses to ~7.5 MB
 Parsing and reducing one takes ~0.4 s, and it happens in the worker pool, so a
 100-pairing sweep reads in roughly ten seconds with a progress bar and neither
 the raw rows nor the decompressed subsystem ever reach the main thread.
-
-`scripts/export_edges.m` still exists, and is the better route when you want the
-reduced CSVs committed to the repository so the published site has data.
 
 ### Reproducing the published phases
 
@@ -203,14 +208,15 @@ The fix at the source is for `solve_direct_transfer.m` to report the continuous
 `theta` it actually used, and to check the index-to-phase mapping (1-based index
 `i` corresponds to phase `(i-1)/(N-1)` for `linspace(0, T, N)`).
 
-Until then the site does two things rather than quietly drawing a trajectory that
-misses its target:
+Because this is an exact-solution viewer, the site **always** solves for the
+phases that close the arc before drawing it, so every trajectory on screen truly
+connects its two orbits. There is no toggle. The readout reports what that cost:
+the endpoint match achieved and the phase correction applied, in cells of
+`1/360`. On data whose phases are already exact the correction reads `+0.00 /
++0.00` and the match reads `0 km`, so the display doubles as a check on the
+export.
 
-- the readout reports the reconstruction gap, the gap after fitting, and the
-  phase correction in grid cells, flagged when the gap exceeds 1e-4;
-- **Fit phases so the arc closes** solves for the phases that actually close the
-  transfer and draws that trajectory — the one the solver found. It costs about
-  40 ms per arc and runs in the worker pool.
+Fitting costs about 40 ms per arc and runs in the worker pool.
 
 ---
 
