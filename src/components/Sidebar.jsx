@@ -66,16 +66,19 @@ export default function Sidebar() {
             ))}
           </select>
 
+          {/* The impulse counts are the n<k> folders this solve actually has —
+              never a free-form number, and never a count inferred from the rows.
+              A pair with n2/ and n3/ offers 2 and 3, and nothing else. */}
           <Field label="Impulses">
-            {available.length > 1 ? (
-              <select value={nImpulse ?? ''} onChange={(e) => set({ nImpulse: Number(e.target.value), rank: 1 })}>
-                {available.map((n) => (
-                  <option key={n} value={n}>{n}-impulse · {rowsByN.get(n).length} solutions</option>
-                ))}
-              </select>
-            ) : (
-              <input type="number" value={nImpulse ?? 2} readOnly disabled />
-            )}
+            <select
+              value={nImpulse ?? ''}
+              onChange={(e) => set({ nImpulse: Number(e.target.value), rank: 1 })}
+              disabled={available.length < 2}
+            >
+              {available.map((n) => (
+                <option key={n} value={n}>{n}-impulse · {rowsByN.get(n).length} solutions</option>
+              ))}
+            </select>
           </Field>
 
           {available.length > 1 && (

@@ -213,12 +213,18 @@ export const useStore = create((set, get) => ({
         if (entry.orbitsFile) {
           orbitsCsv = parseOrbitsCsv(await source.readText(entry.orbitsFile));
         }
+        // Keyed by the folder's k, not by a count inferred from the rows: the
+        // n<k> directory is what the run declares, and it is what the impulse
+        // selector offers.
         for (const variant of entry.impulses ?? []) {
           let rows = [];
           for (const file of variant.files) {
             rows = rows.concat(parseTransfersCsv(await source.readText(file)));
           }
-          if (rows.length) rowsByN.set(variant.n, rows);
+          if (rows.length) {
+            const existing = rowsByN.get(variant.n);
+            rowsByN.set(variant.n, existing ? existing.concat(rows) : rows);
+          }
         }
 
         // Solver .mat files: one pairing each, ~22k solutions apiece. They are

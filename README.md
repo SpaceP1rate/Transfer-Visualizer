@@ -113,9 +113,14 @@ public/data/solutions/
   edges_<DEP>_to_<ARR>/edge_*.mat       the solver's raw output, read as-is
 ```
 
-The **impulse count is never hardcoded**. The reader discovers how many `dvN_*`
-and `t_legN` columns a file actually has, and the selector is built from the
-`n<k>` folders present, so a 4- or 5-impulse export drops in with no code change.
+The **impulse selector is the folder list**. It offers exactly the `n<k>`
+directories that exist for the selected pair and nothing else — a solve with
+`n2/` and `n3/` offers 2 and 3; a solve with only `n2/` offers 2 and is not
+editable. There is no free-form number and no count guessed from the rows, so a
+4- or 5-impulse export drops in with no code change and an absent one can never
+be selected. Within a file the reader still discovers how many `dvN_*` and
+`t_legN` columns are actually present, which is what lets a run with a zero
+midcourse burn read correctly.
 
 `edge_*.mat` files are read directly in the browser (see below), which skips the
 MATLAB export step — but a full run is of order a million rows per family pair,
