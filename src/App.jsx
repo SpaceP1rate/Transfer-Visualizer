@@ -36,18 +36,18 @@ export default function App() {
           <h1>CR3BP Transfer Visualizer</h1>
           <span className="byline">A. Hakobyan</span>
         </div>
-        <span className="meta">Earth–Moon · synodic frame · nondimensional</span>
+        <span className="meta optional-1">Earth–Moon · synodic frame · nondimensional</span>
         <span className="spacer" />
         {pairData?.icSource === 'catalog' && (
           <span
             className="meta"
-            title="No orbits CSV was supplied with this solve folder, so initial conditions were resolved from the JPL catalog snapshot using the study's own sampling rule."
+            title="No orbits CSV was supplied with this solve folder, so the initial conditions were resolved from the JPL Three-Body Periodic Orbits catalog using the study's own sampling rule."
           >
-            ICs from catalog
+            Periodic orbit initial conditions from the JPL three-body catalog
           </span>
         )}
         {system && (
-          <span className="meta">
+          <span className="meta optional-2">
             μ {system.mu.toFixed(11)} · LU {system.lunitKm.toFixed(1)} km · TU {(system.tunitS / 86400).toFixed(4)} d
           </span>
         )}

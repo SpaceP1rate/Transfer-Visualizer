@@ -190,6 +190,11 @@ export default function Sidebar() {
         <div className="swatches">
           {hasSolutions && (
             <>
+              {/* Arcs first, in the order the eye meets them along a transfer —
+                  the orbit you leave, the orbit you arrive on, the arc between,
+                  its overlay, and the state that disqualifies an arc. The point
+                  markers come after, so line entries and point entries are never
+                  interleaved. */}
               <span className="swatch"><i style={{ background: series.departure }} />Departure orbit</span>
               <span className="swatch"><i style={{ background: series.arrival }} />Arrival orbit</span>
               <span className="swatch"><i style={{ background: series.transfer }} />Transfer, {nImpulse ?? 'n'}-impulse</span>
@@ -199,8 +204,8 @@ export default function Sidebar() {
                   <span style={{ color: ink.secondary }}>Transfer, {compareWith}-impulse</span>
                 </span>
               )}
+              <span className="swatch"><i style={{ background: status.critical }} />Transfer, hits the Moon</span>
               <span className="swatch"><i className="dot" style={{ background: ink.primary }} />Impulse</span>
-              <span className="swatch"><i style={{ background: status.critical }} />Lunar impact</span>
             </>
           )}
         </div>

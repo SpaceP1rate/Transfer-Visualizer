@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore, dvGrid, localMinimaViolations } from '../store.js';
-import { ink, rampCss, rampGradient, status } from '../theme.js';
+import { ink, surfaceCss, surfaceGradient, status } from '../theme.js';
 
 /**
  * Delta-V over the departure x arrival grid at one time of flight.
@@ -18,7 +18,12 @@ import { ink, rampCss, rampGradient, status } from '../theme.js';
  *     evidence of a local minimum.
  */
 
-const CELL = 26;
+// The cell size is derived from the rendered width rather than fixed, so the
+// canvas is never scaled after the fact. A canvas stretched by CSS needs its
+// pointer coordinates divided back by that stretch on each axis independently,
+// which is easy to get wrong and impossible to notice at the origin — the error
+// is zero in the top-left corner and grows with distance from it.
+const MIN_CELL = 14;
 const PAD = { left: 34, top: 20, right: 6, bottom: 6 };
 
 export default function DvSurface() {
@@ -55,13 +60,32 @@ export default function DvSurface() {
 
   const nd = grid.nd, na = grid.na;
 
+  // Width the canvas is actually laid out at, measured rather than assumed.
+  const wrapRef = useRef(null);
+  const [width, setWidth] = useState(0);
+  // Re-run when the grid appears: on the first render there is no data yet, the
+  // component returns early, and the element this observes does not exist.
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    ro.observe(el);
+    setWidth(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, [nd, na]);
+
+  const CELL = na && width ? Math.max(MIN_CELL, (width - PAD.left - PAD.right) / na) : MIN_CELL;
+
   useEffect(() => {
     const cv = canvasRef.current;
-    if (!cv || !nd || !na) return;
+    if (!cv || !nd || !na || !width) return;
     const w = PAD.left + na * CELL + PAD.right;
     const h = PAD.top + nd * CELL + PAD.bottom;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    cv.width = w * dpr; cv.height = h * dpr;
+    // CSS size and drawing size agree exactly, so one CSS pixel is one drawing
+    // unit and a pointer position needs no conversion at all.
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    cv.style.width = `${w}px`;
     cv.style.height = `${h}px`;
     const ctx = cv.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -95,7 +119,7 @@ export default function DvSurface() {
           ctx.lineTo(x + CELL - 6, y + 6);
           ctx.stroke();
         } else {
-          ctx.fillStyle = rampCss(1 - (v - min) / span);
+          ctx.fillStyle = surfaceCss((v - min) / span);
           ctx.fillRect(x + 1, y + 1, CELL - 2, CELL - 2);
         }
 
@@ -124,17 +148,18 @@ export default function DvSurface() {
     for (let a = 0; a < na; a++) {
       ctx.fillText(String(a + 1), PAD.left + a * CELL + CELL / 2, PAD.top - 9);
     }
-  }, [grid, min, max, minCell, violations, depIdx, arrIdx, nd, na]);
+  }, [grid, min, max, minCell, violations, depIdx, arrIdx, nd, na, width, CELL]);
 
   if (!nd || !na) {
     return <p style={{ color: ink.muted, fontSize: 12, margin: 0 }}>No solution grid for this pair yet.</p>;
   }
 
+  // A plain function, deliberately: this sits after an early return, and a hook
+  // here changes the hook count between renders the moment the grid is empty.
   const toCell = (e) => {
     const r = e.currentTarget.getBoundingClientRect();
-    const scale = r.width / (PAD.left + na * CELL + PAD.right);
-    const ai = Math.floor(((e.clientX - r.left) / scale - PAD.left) / CELL);
-    const di = Math.floor(((e.clientY - r.top) / scale - PAD.top) / CELL);
+    const ai = Math.floor((e.clientX - r.left - PAD.left) / CELL);
+    const di = Math.floor((e.clientY - r.top - PAD.top) / CELL);
     if (ai < 0 || ai >= na || di < 0 || di >= nd) return null;
     return { dep: di, arr: ai };
   };
@@ -144,7 +169,7 @@ export default function DvSurface() {
   return (
     <div className="panel">
       <h2>Δv surface · {nImpulse}-impulse</h2>
-      <div className="heatwrap">
+      <div className="heatwrap" ref={wrapRef}>
         <canvas
           ref={canvasRef}
           onMouseMove={(e) => {
@@ -171,7 +196,7 @@ export default function DvSurface() {
         )}
       </div>
 
-      <div className="rampbar" style={{ background: rampGradient, transform: 'scaleX(-1)' }} />
+      <div className="rampbar" style={{ background: surfaceGradient }} />
       <div className="rampscale">
         <span>{Number.isFinite(min) ? `${(min * vunit * 1000).toFixed(0)} m/s` : '—'}</span>
         <span className="axis-label">departure ↓ · arrival →</span>

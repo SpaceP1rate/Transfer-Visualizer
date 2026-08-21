@@ -75,7 +75,13 @@ header .meta {
   color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
+
+/* The header carries three separate notes; drop the least load-bearing ones
+   rather than let them wrap into the title. */
+@media (max-width: 1320px) { header .meta.optional-2 { display: none; } }
+@media (max-width: 1080px) { header .meta.optional-1 { display: none; } }
 
 aside {
   overflow-y: auto;
@@ -242,7 +248,7 @@ hr {
 /* --- grid heatmap ------------------------------------------------------- */
 
 .heatwrap { position: relative; }
-.heatwrap canvas { width: 100%; display: block; border-radius: 4px; cursor: crosshair; }
+.heatwrap canvas { display: block; border-radius: 4px; cursor: crosshair; }
 
 .axis-label {
   font-size: 10px;

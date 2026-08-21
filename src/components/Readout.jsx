@@ -119,10 +119,13 @@ export default function Readout() {
           <Row k="Arrival phase" v={`${(row.arrival_phase * 100).toFixed(1)}%`} sub="of period" />
 
           {row.min_moon_dist != null && (
+            // Below the surface the distance to the Moon's centre is not a
+            // "closest approach" any more, so quoting it to the kilometre
+            // implies a flyby that never happens.
             <Row
               k="Closest lunar pass"
-              v={km(row.min_moon_dist)}
-              sub={`${(row.min_moon_dist / moonRadius).toFixed(1)} R☾`}
+              v={row.lunar_valid === false ? '< lunar radius' : km(row.min_moon_dist)}
+              sub={row.lunar_valid === false ? null : `${(row.min_moon_dist / moonRadius).toFixed(1)} R☾`}
               tone={row.lunar_valid === false ? status.critical : undefined}
             />
           )}
