@@ -5,7 +5,7 @@ import * as THREE from 'three';
 
 import { useStore, solutionAt, orbitFor } from '../store.js';
 import { useAsync, toPoints } from '../hooks.js';
-import { propagateOrbitAsync, familySweepAsync, transferAsync } from '../lib/propagator-client.js';
+import { propagateOrbitAsync, familySweepAsync, transferAsync, fitPhasesAsync } from '../lib/propagator-client.js';
 import { ink, series, status, ramp } from '../theme.js';
 
 /**
@@ -155,15 +155,16 @@ function PeriodicOrbit({ orbit, color, opacity = 1, width = 2 }) {
 }
 
 /** One reconstructed transfer: coast arcs plus a marker at every impulse. */
-function Transfer({ dep, arr, row, color, dashed = false, showImpulses = true, channel }) {
+function Transfer({ dep, arr, row, color, dashed = false, showImpulses = true, channel, closeArc = false }) {
   const [data] = useAsync(() => {
     if (!dep || !arr || !row) return null;
-    return transferAsync(
-      { ic: Array.from(dep.ic), period: dep.period },
-      { ic: Array.from(arr.ic), period: arr.period },
-      row, 340, channel
-    );
-  }, [dep?.id, arr?.id, row, channel]);
+    const d = { ic: Array.from(dep.ic), period: dep.period };
+    const a = { ic: Array.from(arr.ic), period: arr.period };
+    if (!closeArc) return transferAsync(d, a, row, 340, channel);
+    // Solve for the phases that close the arc first, then draw that trajectory.
+    return fitPhasesAsync(d, a, row, 360, `${channel}:fit`)
+      .then((fit) => transferAsync(d, a, row, 340, channel, fit));
+  }, [dep?.id, arr?.id, row, channel, closeArc]);
 
   const legs = useMemo(() => (data ? data.legs.map((l) => toPoints(l.positions)) : []), [data]);
   if (!data) return null;
@@ -256,6 +257,7 @@ export default function Scene() {
   const nImpulse = useStore((s) => s.nImpulse);
   const compareWith = useStore((s) => s.compareWith);
   const rank = useStore((s) => s.rank);
+  const closeArc = useStore((s) => s.closeArc);
   const hideLunarInvalid = useStore((s) => s.hideLunarInvalid);
   const pairData = useStore((s) => s.pairData);
 
@@ -311,6 +313,7 @@ export default function Scene() {
           dep={depOrbit} arr={arrOrbit} row={row}
           color={row.lunar_valid === false ? status.critical : series.transfer}
           channel="primary"
+          closeArc={closeArc}
         />
       )}
 

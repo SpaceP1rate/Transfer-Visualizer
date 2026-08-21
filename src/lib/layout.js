@@ -13,11 +13,16 @@
  *   <pair>/transfers*_n<k>.csv             the same, as a flat file
  *   transfers_<DEP>_to_<ARR>_n<k>.csv      flat at the root; the pair comes
  *                                          from the filename
+ *   edges_<DEP>_to_<ARR>/edge_*.mat        the solver's own output, unreduced —
+ *                                          read directly, no MATLAB export step
  *
  * Anything else is reported as unrecognised rather than silently dropped.
  */
 
 const CSV = /\.csv$/i;
+const MAT = /\.mat$/i;
+const EDGE_MAT = /^edge_.*\.mat$/i;
+const EDGES_DIR = /^edges[_-](.+)$/i;
 const FLAT = /^transfers_(.+?)_to_(.+?)_n(\d+)\.csv$/i;
 const NDIR = /^n(\d+)$/i;
 const NSUFFIX = /_n(\d+)\.csv$/i;
@@ -33,12 +38,29 @@ export function groupFiles(paths) {
 
   const pair = (key) => {
     if (!pairs.has(key)) {
-      pairs.set(key, { key, orbitsFile: null, byN: new Map(), label: labelFor(key) });
+      pairs.set(key, { key, orbitsFile: null, byN: new Map(), matFiles: [], label: labelFor(key) });
     }
     return pairs.get(key);
   };
 
+  const catalogs = [];
+
   for (const p of paths) {
+    if (MAT.test(p)) {
+      const seg = p.split('/').filter(Boolean);
+      const name = seg[seg.length - 1];
+      const dir = seg.length > 1 ? seg[seg.length - 2] : null;
+      if (EDGE_MAT.test(name)) {
+        // edges_<DEP>_to_<ARR>/ is what the MATLAB driver creates; fall back to
+        // the containing folder's name when it was renamed.
+        const m = dir ? EDGES_DIR.exec(dir) : null;
+        pair(m ? m[1] : dir ?? '_root').matFiles.push(p);
+      } else {
+        // Anything else is a candidate orbit catalog; confirmed by parsing.
+        catalogs.push(p);
+      }
+      continue;
+    }
     if (!CSV.test(p)) { if (!p.endsWith('/')) ignored.push(p); continue; }
     const seg = p.split('/').filter(Boolean);
     const name = seg[seg.length - 1];
@@ -75,7 +97,7 @@ export function groupFiles(paths) {
 
   const out = [];
   for (const p of pairs.values()) {
-    if (!p.byN.size) { if (!p.orbitsFile) continue; }
+    if (!p.byN.size && !p.matFiles.length && !p.orbitsFile) continue;
     const [dep, arr] = splitPair(p.key);
     out.push({
       key: p.key,
@@ -83,13 +105,14 @@ export function groupFiles(paths) {
       depFamily: dep,
       arrFamily: arr,
       orbitsFile: p.orbitsFile,
+      matFiles: p.matFiles.sort(),
       impulses: [...p.byN.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([n, files]) => ({ n, files })),
     });
   }
   out.sort((a, b) => a.key.localeCompare(b.key));
-  return { pairs: out, ignored };
+  return { pairs: out, ignored, catalogs };
 }
 
 function addFile(p, n, path) {

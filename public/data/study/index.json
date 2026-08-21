@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-21T01:28:52.315Z",
+  "generated": "2026-08-21T02:19:19.215Z",
   "nSamples": 10,
   "cDep": [
     3,
@@ -10,6 +10,26 @@
     3.16
   ],
   "pairs": [
+    {
+      "key": "L1_Halo_to_L1_Lyapunov",
+      "label": "L1 Halo (north) → L1 Lyapunov",
+      "depFamily": "L1_Halo",
+      "arrFamily": "L1_Lyapunov",
+      "file": "L1_Halo_to_L1_Lyapunov.json",
+      "tofRange": [
+        0.1,
+        3.058835785847985
+      ],
+      "tofPoints": 60,
+      "depJacobi": [
+        3.00003020244362,
+        3.17434351933012
+      ],
+      "arrJacobi": [
+        3.00012663210497,
+        3.15995359450337
+      ]
+    },
     {
       "key": "L1_Halo_to_L2_Halo",
       "label": "L1 Halo (north) → L2 Halo (north)",
@@ -51,6 +71,46 @@
       ]
     },
     {
+      "key": "L1_Lyapunov_to_L1_Halo",
+      "label": "L1 Lyapunov → L1 Halo (north)",
+      "depFamily": "L1_Lyapunov",
+      "arrFamily": "L1_Halo",
+      "file": "L1_Lyapunov_to_L1_Halo.json",
+      "tofRange": [
+        0.1,
+        3.003161379209648
+      ],
+      "tofPoints": 60,
+      "depJacobi": [
+        3.00012663210497,
+        3.17993308825365
+      ],
+      "arrJacobi": [
+        3.00003020244362,
+        3.15995969453054
+      ]
+    },
+    {
+      "key": "L1_Lyapunov_to_L2_Halo",
+      "label": "L1 Lyapunov → L2 Halo (north)",
+      "depFamily": "L1_Lyapunov",
+      "arrFamily": "L2_Halo",
+      "file": "L1_Lyapunov_to_L2_Halo.json",
+      "tofRange": [
+        0.1,
+        3.2233756526997133
+      ],
+      "tofPoints": 60,
+      "depJacobi": [
+        3.00012663210497,
+        3.17993308825365
+      ],
+      "arrJacobi": [
+        3.01604024047133,
+        3.15211885653673
+      ]
+    },
+    {
       "key": "L1_Lyapunov_to_L2_Lyapunov",
       "label": "L1 Lyapunov → L2 Lyapunov",
       "depFamily": "L1_Lyapunov",
@@ -68,6 +128,126 @@
       "arrJacobi": [
         3.00007207027646,
         3.1599674935744
+      ]
+    },
+    {
+      "key": "L2_Halo_to_L1_Halo",
+      "label": "L2 Halo (north) → L1 Halo (north)",
+      "depFamily": "L2_Halo",
+      "arrFamily": "L1_Halo",
+      "file": "L2_Halo_to_L1_Halo.json",
+      "tofRange": [
+        0.1,
+        2.919740099363041
+      ],
+      "tofPoints": 60,
+      "depJacobi": [
+        3.01604024047133,
+        3.15211885653673
+      ],
+      "arrJacobi": [
+        3.00003020244362,
+        3.15995969453054
+      ]
+    },
+    {
+      "key": "L2_Halo_to_L1_Lyapunov",
+      "label": "L2 Halo (north) → L1 Lyapunov",
+      "depFamily": "L2_Halo",
+      "arrFamily": "L1_Lyapunov",
+      "file": "L2_Halo_to_L1_Lyapunov.json",
+      "tofRange": [
+        0.1,
+        3.276641288426229
+      ],
+      "tofPoints": 60,
+      "depJacobi": [
+        3.01604024047133,
+        3.15211885653673
+      ],
+      "arrJacobi": [
+        3.00012663210497,
+        3.15995359450337
+      ]
+    },
+    {
+      "key": "L2_Halo_to_L2_Lyapunov",
+      "label": "L2 Halo (north) → L2 Lyapunov",
+      "depFamily": "L2_Halo",
+      "arrFamily": "L2_Lyapunov",
+      "file": "L2_Halo_to_L2_Lyapunov.json",
+      "tofRange": [
+        0.1,
+        3.4747414977226283
+      ],
+      "tofPoints": 60,
+      "depJacobi": [
+        3.01604024047133,
+        3.15211885653673
+      ],
+      "arrJacobi": [
+        3.00007207027646,
+        3.1599674935744
+      ]
+    },
+    {
+      "key": "L2_Lyapunov_to_L1_Halo",
+      "label": "L2 Lyapunov → L1 Halo (north)",
+      "depFamily": "L2_Lyapunov",
+      "arrFamily": "L1_Halo",
+      "file": "L2_Lyapunov_to_L1_Halo.json",
+      "tofRange": [
+        0.1,
+        3.207479371051735
+      ],
+      "tofPoints": 60,
+      "depJacobi": [
+        3.00007207027646,
+        3.17216041794078
+      ],
+      "arrJacobi": [
+        3.00003020244362,
+        3.15995969453054
+      ]
+    },
+    {
+      "key": "L2_Lyapunov_to_L1_Lyapunov",
+      "label": "L2 Lyapunov → L1 Lyapunov",
+      "depFamily": "L2_Lyapunov",
+      "arrFamily": "L1_Lyapunov",
+      "file": "L2_Lyapunov_to_L1_Lyapunov.json",
+      "tofRange": [
+        0.1,
+        3.564380560114923
+      ],
+      "tofPoints": 60,
+      "depJacobi": [
+        3.00007207027646,
+        3.17216041794078
+      ],
+      "arrJacobi": [
+        3.00012663210497,
+        3.15995359450337
+      ]
+    },
+    {
+      "key": "L2_Lyapunov_to_L2_Halo",
+      "label": "L2 Lyapunov → L2 Halo (north)",
+      "depFamily": "L2_Lyapunov",
+      "arrFamily": "L2_Halo",
+      "file": "L2_Lyapunov_to_L2_Halo.json",
+      "tofRange": [
+        0.1,
+        3.427693644541801
+      ],
+      "tofPoints": 60,
+      "depJacobi": [
+        3.00007207027646,
+        3.17216041794078
+      ],
+      "arrJacobi": [
+        3.01604024047133,
+        3.15211885653673
       ]
     }
   ]

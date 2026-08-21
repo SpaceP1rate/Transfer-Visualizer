@@ -9,7 +9,8 @@
 
 import { makeDerivs, integrate, moonDistance } from '../lib/cr3bp.js';
 import { Family, STRIDE } from '../lib/catalog.js';
-import { reconstructTransfer } from '../lib/trajectory.js';
+import { reconstructTransfer, fitPhases } from '../lib/trajectory.js';
+import { readEdgeFile } from '../lib/mat-table.js';
 
 /** @type {Map<string, Family>} */
 const families = new Map();
@@ -25,6 +26,21 @@ const orbitFrom = (spec) => {
 };
 
 const handlers = {
+  /**
+   * Parse one solver edge_*.mat and hand back only the reduced rows. A full
+   * pairing is ~22k solutions and the raw parse allocates tens of megabytes, so
+   * the reduction happens here and the bulk is dropped before it ever crosses
+   * back to the main thread.
+   */
+  async parseEdgeMat({ buffer, path }) {
+    try {
+      const { rows, report } = await readEdgeFile(buffer);
+      return { payload: { ok: true, path, rows, report } };
+    } catch (e) {
+      return { payload: { ok: false, path, error: String(e?.message ?? e) } };
+    }
+  },
+
   setMu({ mu }) {
     MU = mu;
     return { mu };
@@ -96,10 +112,18 @@ const handlers = {
     };
   },
 
+  /** Solve for the phases that close the arc, and report the correction. */
+  fitPhases({ dep, arr, transfer, N }) {
+    return fitPhases(MU, { dep: orbitFrom(dep), arr: orbitFrom(arr), transfer, N });
+  },
+
   /** Reconstruct one impulsive transfer. */
-  transfer({ dep, arr, transfer, samplesPerLeg = 320 }) {
+  transfer({ dep, arr, transfer, samplesPerLeg = 320, phases = null }) {
+    const row = phases
+      ? { ...transfer, departure_phase: phases.departurePhase, arrival_phase: phases.arrivalPhase }
+      : transfer;
     const result = reconstructTransfer(MU, {
-      dep: orbitFrom(dep), arr: orbitFrom(arr), transfer, samplesPerLeg,
+      dep: orbitFrom(dep), arr: orbitFrom(arr), transfer: row, samplesPerLeg,
     });
     const buffers = result.legs.map((l) => l.positions.buffer);
     return {
@@ -115,10 +139,10 @@ const handlers = {
   },
 };
 
-self.onmessage = (e) => {
+self.onmessage = async (e) => {
   const { id, type, args } = e.data;
   try {
-    const out = handlers[type](args);
+    const out = await handlers[type](args);
     const payload = out && out.payload !== undefined ? out.payload : out;
     self.postMessage({ id, ok: true, payload }, out?.transfer ?? []);
   } catch (err) {

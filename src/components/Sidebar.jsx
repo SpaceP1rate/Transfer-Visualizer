@@ -33,7 +33,11 @@ function SourcePicker() {
       setNote(`No transfer CSVs recognised in “${src.name}”. Expected transfers_*_n<k>.csv, or n<k>/ folders inside a pair folder.`);
       return;
     }
-    setNote(`${src.name}: ${pairs.length} pair${pairs.length > 1 ? 's' : ''}, ${src.files?.size ?? 0} file(s)`);
+    const mats = pairs.reduce((a, p) => a + (p.matFiles?.length ?? 0), 0);
+    setNote(
+      `${src.name}: ${pairs.length} pair${pairs.length > 1 ? 's' : ''}, ` +
+      `${src.files?.size ?? 0} file(s)${mats ? ` — ${mats} solver .mat read directly` : ''}`
+    );
     await setSource(src);
   };
 
@@ -96,6 +100,8 @@ export default function Sidebar() {
   const sweepCount = useStore((s) => s.sweepCount);
   const system = useStore((s) => s.system);
   const view = useStore((s) => s.view);
+  const scan = useStore((s) => s.scan);
+  const sourceError = useStore((s) => s.sourceError);
   const set = useStore((s) => s.set);
 
   const available = [...rowsByN.keys()].sort((a, b) => a - b);
@@ -104,6 +110,21 @@ export default function Sidebar() {
 
   return (
     <aside>
+      {scan && (
+        <div className="panel">
+          <h2>Reading solver output</h2>
+          <div className="progress"><i style={{ width: `${(scan.done / scan.total) * 100}%` }} /></div>
+          <div className="rampscale">
+            <span>{scan.done} / {scan.total} pairings</span>
+            <span>{scan.errors ? `${scan.errors} failed` : ''}</span>
+          </div>
+        </div>
+      )}
+
+      {sourceError && !scan && (
+        <div className="notice critical">{sourceError}</div>
+      )}
+
       <div className="panel">
         <h2>Family pair</h2>
         <select value={pairKey ?? ''} onChange={(e) => loadPair(e.target.value)}>
@@ -185,6 +206,7 @@ export default function Sidebar() {
             </select>
           </Field>
           <Check k="hideLunarInvalid" label="Hide arcs that hit the Moon" />
+          <Check k="closeArc" label="Fit phases so the arc closes" />
         </div>
       )}
 

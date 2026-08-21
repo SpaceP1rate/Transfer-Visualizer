@@ -308,3 +308,11 @@ table.mini td.num { text-align: right; color: var(--ink); }
 
 .viewbar { display: flex; gap: 5px; }
 .btn.on { background: var(--xfer); color: #fff; border-color: var(--xfer); }
+
+.progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--raised);
+  overflow: hidden;
+}
+.progress i { display: block; height: 100%; background: var(--xfer); transition: width .15s linear; }

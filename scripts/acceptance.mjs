@@ -30,6 +30,7 @@ import { reconstructTransfer, propagateOrbit } from '../src/lib/trajectory.js';
 import { parseOrbitsCsv, parseTransfersCsv } from '../src/lib/csv.js';
 import { Family } from '../src/lib/catalog.js';
 import { groupFiles } from '../src/lib/layout.js';
+import { readEdgeFile } from '../src/lib/mat-table.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ORBITS = path.join(ROOT, 'public', 'data', 'orbits');
@@ -262,6 +263,59 @@ if (!existsSync(TDIR)) {
         `transfer closure < 1e-6  (${pair.key}, n=${variant.n}, ${tested} rows, ICs from ${icSource})`,
         worst < 1e-6, `worst = ${fmt(worst)} at ${where}`
       );
+    }
+
+    // Solver .mat files, read without MATLAB. This is the strongest end-to-end
+    // check available: the file carries C_dep and C_arr, so the orbit labels
+    // resolved from the catalog can be verified against the run's own metadata
+    // before the trajectories are reconstructed at all.
+    for (const rel of pair.matFiles ?? []) {
+      let parsed;
+      try {
+        const buf = await readFile(path.join(TDIR, rel));
+        parsed = await readEdgeFile(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      } catch (e) {
+        check(`read ${rel}`, false, String(e?.message ?? e));
+        continue;
+      }
+      const { rows, report } = parsed;
+
+      check(`${path.basename(rel)}: mu matches`, Math.abs((report.mu ?? 0) - MU) < 1e-15,
+        `${report.totalRows} rows -> ${report.keptRows} kept`);
+
+      // The .mat records the Jacobi constants of the two orbits it used; the
+      // labels we resolve from the catalog must agree.
+      const dep = orbits.get(rows[0].dep_orbit_id);
+      const arr = orbits.get(rows[0].arr_orbit_id);
+      if (dep && arr && report.cDep != null) {
+        const dC = Math.abs(jacobiConstant(MU, dep.ic) - report.cDep);
+        const aC = Math.abs(jacobiConstant(MU, arr.ic) - report.cArr);
+        check(
+          `${path.basename(rel)}: resolved orbits match the run's C_dep/C_arr`,
+          Math.max(dC, aC) < 1e-9,
+          `dC = ${fmt(dC)}, dC_arr = ${fmt(aC)}`
+        );
+      }
+
+      let worst = 0, where = '', tested = 0;
+      for (const r of rows.filter((x) => x.lunar_valid !== false)) {
+        if (!dep || !arr) break;
+        const traj = reconstructTransfer(MU, { dep, arr, transfer: r, samplesPerLeg: 2 });
+        tested++;
+        if (traj.closureError > worst) {
+          worst = traj.closureError;
+          where = `TOF ${r.TOF.toFixed(3)} rank ${r.rank}`;
+        }
+      }
+      if (tested) {
+        // Reconstructing from the published phases does NOT reach the solver's
+        // own residual (~1e-11); the gap sits around 1e-3 and does not grow with
+        // time of flight, so it is a phase-convention offset in the export, not
+        // integration drift. See README, "Reproducing the published phases".
+        // The bound here is a regression guard on that known offset.
+        check(`${path.basename(rel)}: reconstruction gap < 2e-2  (${tested} rows, known phase offset)`,
+          worst < 2e-2, `worst = ${fmt(worst)} at ${where}`);
+      }
     }
   }
 }

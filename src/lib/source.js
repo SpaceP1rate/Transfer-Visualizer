@@ -44,6 +44,12 @@ export class RemoteSource {
     if (!r.ok) throw new Error(`${relPath}: ${r.status}`);
     return r.text();
   }
+
+  async readBinary(_pairKey, relPath) {
+    const r = await fetch(`${this.base}/${relPath}`);
+    if (!r.ok) throw new Error(`${relPath}: ${r.status}`);
+    return r.arrayBuffer();
+  }
 }
 
 export class LocalSource {
@@ -55,9 +61,10 @@ export class LocalSource {
     this.kind = 'local';
     this.name = name;
     this.files = files;
-    const { pairs, ignored } = groupFiles([...files.keys()]);
+    const { pairs, ignored, catalogs } = groupFiles([...files.keys()]);
     this.pairs = pairs;
     this.ignored = ignored;
+    this.catalogs = catalogs ?? [];
     // Paths are absolute within the chosen folder, so pair-relative reads have
     // to be resolved back against the full path list.
     this.byPair = new Map(pairs.map((p) => [p.key, p]));
@@ -103,10 +110,18 @@ export class LocalSource {
   }
 
   async readText(pairKey, relPath) {
+    return (await this._file(pairKey, relPath)).text();
+  }
+
+  async readBinary(pairKey, relPath) {
+    return (await this._file(pairKey, relPath)).arrayBuffer();
+  }
+
+  async _file(pairKey, relPath) {
     // `relPath` from groupFiles is already relative to the chosen folder.
     const f = this.files.get(relPath) ?? this.files.get(`${pairKey}/${relPath}`);
     if (!f) throw new Error(`missing file: ${relPath}`);
-    return f.text();
+    return f;
   }
 
   get totalBytes() {

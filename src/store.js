@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { openCatalog } from './lib/catalog.js';
 import { parseTransfersCsv, parseOrbitsCsv } from './lib/csv.js';
-import { shareFamily, setMu } from './lib/propagator-client.js';
+import { shareFamily, setMu, parseEdgeMatAsync, poolSize } from './lib/propagator-client.js';
 import { RemoteSource } from './lib/source.js';
 
 const BASE = import.meta.env.BASE_URL ?? './';
@@ -97,6 +97,7 @@ export const useStore = create((set, get) => ({
   source: null,
   sourceError: null,
   loading: false,
+  scan: null,          // { done, total, errors } while reading .mat pairings
   study: null,
   pairKey: null,
   pairs: [],              // merged list of pairs the site can show
@@ -112,6 +113,7 @@ export const useStore = create((set, get) => ({
   rank: 1,
   hideLunarInvalid: true,
 
+  closeArc: false,   // fit the phases so the arc actually reaches the arrival orbit
   view: '3D',
   showSweep: true,
   showGrid: true,
@@ -215,6 +217,14 @@ export const useStore = create((set, get) => ({
 
     let orbitsCsv = null;
     const rowsByN = new Map();
+    const addRows = (rows) => {
+      for (const r of rows) {
+        const n = r.n_impulse ?? 2;
+        if (!rowsByN.has(n)) rowsByN.set(n, []);
+        rowsByN.get(n).push(r);
+      }
+    };
+
     try {
       if (entry.hasTransfers && source) {
         if (entry.orbitsFile) {
@@ -227,9 +237,42 @@ export const useStore = create((set, get) => ({
           }
           if (rows.length) rowsByN.set(variant.n, rows);
         }
+
+        // Solver .mat files: one pairing each, ~22k solutions apiece. They are
+        // parsed and reduced in the worker pool so neither the raw rows nor the
+        // decompressed subsystem ever reach the main thread.
+        const mats = entry.matFiles ?? [];
+        if (mats.length) {
+          const errors = [];
+          let done = 0;
+          set({ scan: { done: 0, total: mats.length, errors: 0 } });
+
+          const width = Math.max(1, poolSize());
+          let cursor = 0;
+          const runOne = async () => {
+            while (cursor < mats.length) {
+              const path = mats[cursor++];
+              try {
+                const buf = await source.readBinary(pairKey, path);
+                const res = await parseEdgeMatAsync(buf, path);
+                if (res.ok) addRows(res.rows);
+                else errors.push(`${path}: ${res.error}`);
+              } catch (e) {
+                errors.push(`${path}: ${e?.message ?? e}`);
+              }
+              done++;
+              if (done % 2 === 0 || done === mats.length) {
+                set({ scan: { done, total: mats.length, errors: errors.length } });
+              }
+            }
+          };
+          await Promise.all(Array.from({ length: width }, runOne));
+          set({ scan: null });
+          if (errors.length) set({ sourceError: `${errors.length} file(s) failed: ${errors[0]}` });
+        }
       }
     } catch (e) {
-      set({ sourceError: String(e?.message ?? e) });
+      set({ scan: null, sourceError: String(e?.message ?? e) });
     }
 
     const depFamily = studyDoc?.depFamily ?? entry.depFamily;

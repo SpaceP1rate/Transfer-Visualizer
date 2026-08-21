@@ -86,5 +86,15 @@ export const propagateOrbitAsync = (orbit, samples, channel) =>
 export const familySweepAsync = (key, indices, samples, jacobiRange, channel) =>
   getPool().callSticky(key, 'familySweep', { key, indices, samples, jacobiRange }, { channel });
 
-export const transferAsync = (dep, arr, transfer, samplesPerLeg, channel) =>
-  getPool().call('transfer', { dep, arr, transfer, samplesPerLeg }, { channel });
+export const transferAsync = (dep, arr, transfer, samplesPerLeg, channel, phases = null) =>
+  getPool().call('transfer', { dep, arr, transfer, samplesPerLeg, phases }, { channel });
+
+export const fitPhasesAsync = (dep, arr, transfer, N, channel) =>
+  getPool().call('fitPhases', { dep, arr, transfer, N }, { channel });
+
+/** Parse one solver edge_*.mat off the main thread. The buffer is transferred. */
+export const parseEdgeMatAsync = (buffer, path) =>
+  getPool().call('parseEdgeMat', { buffer, path }, { transfer: [buffer] });
+
+/** How many edge files can be parsed at once. */
+export const poolSize = () => getPool().workers.length;

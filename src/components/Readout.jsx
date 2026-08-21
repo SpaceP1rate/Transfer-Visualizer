@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore, solutionAt, solutionsAt, orbitFor } from '../store.js';
 import { series, status, ink } from '../theme.js';
+import { fitPhasesAsync } from '../lib/propagator-client.js';
 
 /**
  * Numbers for the selected transfer, nondimensional first with the physical
@@ -45,6 +46,23 @@ export default function Readout() {
       slice: pd.slices[sliceIdx],
     };
   }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, compareWith, rank, hideLunarInvalid]);
+
+  // How far the reconstructed arc lands from the arrival orbit at the published
+  // arrival phase. The solver enforced this to ~1e-11, so anything larger is a
+  // disagreement between the export's phase convention and ours, and is worth
+  // showing rather than quietly drawing an arc that misses.
+  const [fit, setFit] = useState(null);
+  useEffect(() => {
+    let live = true;
+    setFit(null);
+    if (!d?.row || !d.dep || !d.arr) return;
+    fitPhasesAsync(
+      { ic: Array.from(d.dep.ic), period: d.dep.period },
+      { ic: Array.from(d.arr.ic), period: d.arr.period },
+      d.row, 360, 'gap'
+    ).then((r) => { if (live) setFit(r); }).catch(() => {});
+    return () => { live = false; };
+  }, [d]);
 
   if (!system || !d) return null;
   const { vunitKmS, tunitS, lunitKm, moonRadius } = system;
@@ -143,6 +161,27 @@ export default function Readout() {
               v={row.position_residual.toExponential(1)}
               tone={row.position_residual > 1e-6 ? status.warning : undefined}
             />
+          )}
+          {fit && (
+            <>
+              <Row
+                k="Reconstruction gap"
+                v={km(fit.gapBefore)}
+                sub={fit.gapBefore.toExponential(1)}
+                tone={fit.gapBefore > 1e-4 ? status.warning : undefined}
+              />
+              <Row
+                k="…after fitting phases"
+                v={km(fit.gapAfter)}
+                sub={fit.gapAfter.toExponential(1)}
+                tone={fit.gapAfter < 1e-6 ? status.good : undefined}
+              />
+              <Row
+                k="Phase correction"
+                v={`${fit.cellsDep >= 0 ? '+' : ''}${fit.cellsDep.toFixed(2)} / ${fit.cellsArr >= 0 ? '+' : ''}${fit.cellsArr.toFixed(2)}`}
+                sub={`cells of 1/${fit.N}`}
+              />
+            </>
           )}
           {row.chain_id != null && <Row k="Multistart seed" v={row.chain_id} />}
           {row.seeds_converged != null && (

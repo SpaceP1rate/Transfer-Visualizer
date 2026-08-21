@@ -33,11 +33,14 @@ const C_ARR = [3.0, 3.16];
 const TOF_MIN = 0.1;
 const TOF_POINTS = 60;
 
-const PAIRS = [
-  { dep: 'L1_Halo', arr: 'L2_Halo' },
-  { dep: 'L1_Halo', arr: 'L2_Lyapunov' },
-  { dep: 'L1_Lyapunov', arr: 'L2_Lyapunov' },
-];
+// Every ordered pair among the study families. Each document is a few KB, and
+// generating all of them means any run the solver produces — including
+// directions the current sweep has not covered — resolves its orbit labels
+// without a rebuild.
+const FAMILIES = ['L1_Halo', 'L1_Lyapunov', 'L2_Halo', 'L2_Lyapunov'];
+const PAIRS = FAMILIES.flatMap((dep) =>
+  FAMILIES.filter((arr) => arr !== dep).map((arr) => ({ dep, arr }))
+);
 
 /** MATLAB linspace + round, 1-based, returned as 0-based indices. */
 function sampleIndices(nTotal, nSamples) {
@@ -133,9 +136,9 @@ for (const { dep, arr } of PAIRS) {
   });
 
   console.log(
-    `${key}\n  dep C ${depOrbits.map((o) => o.jacobi.toFixed(4)).join(' ')}` +
-    `\n  arr C ${arrOrbits.map((o) => o.jacobi.toFixed(4)).join(' ')}` +
-    `\n  TOF grid [${TOF_MIN}, ${tofMax.toFixed(4)}] x ${TOF_POINTS}`
+    `${key.padEnd(30)} dep C ${depOrbits[0].jacobi.toFixed(4)}..${depOrbits[9].jacobi.toFixed(4)}` +
+    `  arr C ${arrOrbits[0].jacobi.toFixed(4)}..${arrOrbits[9].jacobi.toFixed(4)}` +
+    `  TOF <= ${tofMax.toFixed(4)}`
   );
 }
 

@@ -67,7 +67,10 @@ for (const p of pairs) {
       `, max residual ${impulses[impulses.length - 1].maxResidual.toExponential(1)}`
     );
   }
-  if (!impulses.length && !p.orbitsFile) continue;
+  if (p.matFiles?.length) {
+    console.log(`  ${p.key}: ${p.matFiles.length} solver .mat (parsed in the browser)`);
+  }
+  if (!impulses.length && !p.orbitsFile && !p.matFiles?.length) continue;
   out.pairs.push({ ...p, impulses });
 }
 

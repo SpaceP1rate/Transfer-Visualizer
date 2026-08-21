@@ -57,9 +57,8 @@ ones cost nothing at page load and are ready when a study pair reaches for them.
 `--families L1_Halo,L2_Halo` narrows the conversion if you ever want a smaller
 build.
 
-MATLAB `table` objects — the `edge_*.mat` files the solver writes — cannot be
-read outside MATLAB: they serialize as opaque MCOS blobs that neither scipy nor
-any JS reader can decode. That is what `scripts/export_edges.m` is for.
+`src/lib/mat.js` and `src/lib/mat-table.js` read MAT-files in the browser,
+including the `edge_*.mat` tables — see "Reading .mat without MATLAB" below.
 
 Float64 and not Float32: these initial conditions sit on strongly unstable orbits
 (stability index up to ~1100), where a single-precision round trip visibly opens
@@ -97,7 +96,8 @@ export_edges('edges_L1_Halo_to_L2_Halo', 'site_data')
 **A folder on your disk** — use *Data source → Choose folder* in the sidebar.
 The browser reads the files directly; nothing is uploaded and nothing is
 committed, so a full multistart export that would never fit in a repository can
-still be explored.
+still be explored. This also accepts the solver's own `edges_*/edge_*.mat`
+folders — no MATLAB export step (see below).
 
 Both paths use the same layout rules (`src/lib/layout.js`), so a folder that
 works one way works the other:
@@ -107,6 +107,7 @@ works one way works the other:
 <pair>/n<k>/*.csv                     k-impulse solutions
 <pair>/transfers*_n<k>.csv            the same, flat
 transfers_<DEP>_to_<ARR>_n<k>.csv     flat at the root
+edges_<DEP>_to_<ARR>/edge_*.mat       the solver's raw output
 ```
 
 The **impulse count is never hardcoded**. The reader discovers how many `dvN_*`
@@ -132,6 +133,84 @@ If no `orbits*.csv` is supplied, initial conditions are resolved by label
 (`L1_Halo_07`) from the catalog, reproducing `sample_family` exactly — mask on
 `C ∈ [C_min, C_max]` in catalog order, then `round(linspace(1, n_total, 10))`.
 The header shows *ICs from catalog* when that fallback is in use.
+
+---
+
+## Reading .mat without MATLAB
+
+The site reads MATLAB v5/v7 files directly, so a folder of `edge_*.mat` works
+without `export_edges.m` and without a Python step. Two things make that harder
+than it sounds.
+
+**Element padding.** Every MAT data element is padded to an 8-byte boundary
+*except* `miCOMPRESSED`, which is written back-to-back. Pad it anyway and the
+reader walks off the element boundary two variables in, at which point the file
+looks corrupt rather than misparsed.
+
+**Tables are not structs.** A saved `table` is an opaque MCOS object: the
+variable in the file is only a handle, and the contents live in an unnamed
+subsystem variable at the end of the file, inside a `FileWrapper__` cell. Two of
+its cells carry everything needed — one cell of N char arrays (the variable
+names, in order) and one cell of N equal-length columns (the data). Rather than
+hardcoding their positions, which have moved between MATLAB releases,
+`extractTables` finds them by shape, so an unfamiliar layout fails loudly
+instead of returning shifted columns.
+
+A pairing file is ~22k solutions and about 1.8 MB, which decompresses to ~7.5 MB.
+Parsing and reducing one takes ~0.4 s, and it happens in the worker pool, so a
+100-pairing sweep reads in roughly ten seconds with a progress bar and neither
+the raw rows nor the decompressed subsystem ever reach the main thread.
+
+`scripts/export_edges.m` still exists, and is the better route when you want the
+reduced CSVs committed to the repository so the published site has data.
+
+### Reproducing the published phases
+
+Reconstructing an arc from the exported `Departure_Phase` / `Arrival_Phase` does
+**not** land on the arrival orbit to the solver's own accuracy. Measured over one
+pairing file, 60 rank-1 arcs:
+
+| quantity | value |
+|---|---|
+| stored `Position_Residual` | ≤ 1.3e-9 |
+| gap using the published phases, median | 1.2e-3 (≈ 480 km) |
+| gap to the *nearest* point on the arrival orbit | 2.6e-4 (≈ 100 km) |
+| gap after fitting both phases, median | **1.7e-9** |
+| phase correction needed, mean | +0.21 / +0.83 cells of 1/360 |
+
+The last two rows are the finding: **the burns, the time of flight and the orbits
+are all exactly right.** Correcting the two reported phases by a fraction of one
+phase-array cell brings the arc back to 1.7e-9 — the solver's own residual. So
+this is a reporting error in the phase labels, not a physics or accuracy problem.
+
+Four checks rule out the alternatives:
+
+- it is not integration error — the gap does not grow with time of flight, a TOF
+  of 0.1 shows the same ~3e-3 as a TOF of 2.7;
+- it is not the phase array's resolution — linear interpolation of a 360-point
+  array gives the same answer as exact propagation to the phase;
+- it is not the loose tolerance on those arrays — reproducing `ode89`'s
+  `RelTol 1e-7 / AbsTol 1e-8` moves the endpoint states by only ~2e-6, which is a
+  floor on reproducibility but two orders too small;
+- it is not a clean off-by-one either — adding exactly `1/360` to the arrival
+  phase improves the median from 1.2e-3 to 3.2e-4 but does not close it, and the
+  per-arc correction scatters between 0 and ~1.8 cells.
+
+That signature — a correction under one grid cell, varying per arc — is what a
+phase reported from the **phase-array index** rather than the continuous value
+the solver optimised looks like, with the arrival index about one cell short.
+The fix at the source is for `solve_direct_transfer.m` to report the continuous
+`theta` it actually used, and to check the index-to-phase mapping (1-based index
+`i` corresponds to phase `(i-1)/(N-1)` for `linspace(0, T, N)`).
+
+Until then the site does two things rather than quietly drawing a trajectory that
+misses its target:
+
+- the readout reports the reconstruction gap, the gap after fitting, and the
+  phase correction in grid cells, flagged when the gap exceeds 1e-4;
+- **Fit phases so the arc closes** solves for the phases that actually close the
+  transfer and draws that trajectory — the one the solver found. It costs about
+  40 ms per arc and runs in the worker pool.
 
 ---
 
