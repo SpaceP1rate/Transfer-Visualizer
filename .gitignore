@@ -7,8 +7,11 @@ dist/
 shot*.mjs
 net.mjs
 
-# Full solver exports are read from disk via the folder picker, never committed.
+# Raw solver output. Reduce it with scripts/reduce_solutions.mjs and commit the
+# CSVs it writes; the .mat files themselves are hundreds of megabytes per family
+# pair and stay on disk.
 edges_*/
+**/edges_*/
 site_data/
 
 # MATLAB sources stay with the research code. The catalog is committed only in

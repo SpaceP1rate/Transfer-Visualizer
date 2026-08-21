@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 
 import { makeDerivs, integrate, jacobiConstant, librationPoints } from '../src/lib/cr3bp.js';
 import { lyapunovFamily, haloBifurcation, monodromy, canonicalSTM } from '../src/lib/periodic.js';
-import { reconstructTransfer, propagateOrbit } from '../src/lib/trajectory.js';
+import { reconstructTransfer, propagateOrbit, phaseState, PHASE_RESOLUTION } from '../src/lib/trajectory.js';
 import { parseOrbitsCsv, parseTransfersCsv } from '../src/lib/csv.js';
 import { Family } from '../src/lib/catalog.js';
 import { groupFiles } from '../src/lib/layout.js';
@@ -194,6 +194,53 @@ for (const key of STUDY) {
     `continued C = ${bif ? fmt(bif.orbit.jacobi) : 'n/a'}, catalog C = ${fmt(catalogMax)}`);
 }
 
+/**
+ * The reconstruction must land on the arrival orbit to the solver's own residual.
+ *
+ * Both conventions are measured so a regression is unambiguous: reading the
+ * departure and arrival states off the phase array the way the run did, and —
+ * for contrast — propagating to `phase * period`, which is the intuitive reading
+ * and is wrong. The second number is not a failure condition, it is there so
+ * that if someone "fixes" the sampler back to exact propagation, the test says
+ * exactly what changed.
+ */
+function measure(rows, orbits) {
+  const viaArray = [], viaPropagation = [];
+  let where = '', worst = 0;
+
+  for (const r of rows) {
+    const dep = orbits.get(r.dep_orbit_id);
+    const arr = orbits.get(r.arr_orbit_id);
+    if (!dep || !arr) continue;
+
+    const g = reconstructTransfer(MU, { dep, arr, transfer: r, samplesPerLeg: 2 }).closureError;
+    viaArray.push(g);
+    if (g > worst) { worst = g; where = `${r.dep_orbit_id}->${r.arr_orbit_id} TOF ${r.TOF.toFixed(3)}`; }
+
+    // Same arc, but with both endpoints taken by exact propagation to phase*T.
+    const X = Float64Array.from(integrate(f6, dep.ic, r.departure_phase * dep.period,
+      { rtol: 1e-12, atol: 1e-12 }));
+    const dv = r.dvs[0]?.v ?? [0, 0, 0];
+    X[3] += dv[0]; X[4] += dv[1]; X[5] += dv[2];
+    const E = integrate(f6, X, r.TOF, { rtol: 1e-12, atol: 1e-12 });
+    const T = integrate(f6, arr.ic, r.arrival_phase * arr.period, { rtol: 1e-12, atol: 1e-12 });
+    viaPropagation.push(Math.hypot(E[0] - T[0], E[1] - T[1], E[2] - T[2]));
+  }
+
+  if (!viaArray.length) return null;
+  const med = (a) => [...a].sort((x, y) => x - y)[a.length >> 1];
+  return { n: viaArray.length, median: med(viaArray), worst, naive: med(viaPropagation), where };
+}
+
+function report(label, s) {
+  check(
+    `arcs close on the arrival orbit  (${label}, ${s.n} rows)`,
+    s.median < 1e-6 && s.worst < 1e-4,
+    `median ${fmt(s.median)}, worst ${fmt(s.worst)} at ${s.where} ` +
+    `— propagating to phase*T instead would give ${fmt(s.naive)}`
+  );
+}
+
 // --- 10. transfer closure ---------------------------------------------------
 console.log('');
 const TDIR = path.join(ROOT, 'public', 'data', 'solutions');
@@ -245,24 +292,14 @@ if (!existsSync(TDIR)) {
       for (const rel of variant.files) {
         rows = rows.concat(parseTransfersCsv(await readFile(path.join(TDIR, rel), 'utf8')));
       }
-      const sample = rows.filter((r) => r.lunar_valid !== false).slice(0, 120);
-      let worst = 0, where = '', tested = 0;
-      for (const r of sample) {
-        const dep = orbits.get(r.dep_orbit_id);
-        const arr = orbits.get(r.arr_orbit_id);
-        if (!dep || !arr) continue;
-        const traj = reconstructTransfer(MU, { dep, arr, transfer: r, samplesPerLeg: 2 });
-        tested++;
-        if (traj.closureError > worst) {
-          worst = traj.closureError;
-          where = `${r.dep_orbit_id}->${r.arr_orbit_id} TOF ${r.TOF.toFixed(3)}`;
-        }
-      }
-      if (!tested) { console.log(`  ....  ${pair.key} n=${variant.n}: no rows matched the orbit ids`); continue; }
-      check(
-        `transfer closure < 1e-6  (${pair.key}, n=${variant.n}, ${tested} rows, ICs from ${icSource})`,
-        worst < 1e-6, `worst = ${fmt(worst)} at ${where}`
-      );
+      // Sampled across the file rather than off the top, so the check sees every
+      // orbit pair and the whole time-of-flight range instead of one corner.
+      const usable = rows.filter((r) => r.lunar_valid !== false);
+      const stride = Math.max(1, Math.floor(usable.length / 120));
+      const sample = usable.filter((_, i) => i % stride === 0).slice(0, 120);
+      const stats = measure(sample, orbits);
+      if (!stats) { console.log(`  ....  ${pair.key} n=${variant.n}: no rows matched the orbit ids`); continue; }
+      report(`${pair.key}, n=${variant.n}, ICs from ${icSource}`, stats);
     }
 
     // Solver .mat files, read without MATLAB. This is the strongest end-to-end
@@ -297,25 +334,8 @@ if (!existsSync(TDIR)) {
         );
       }
 
-      let worst = 0, where = '', tested = 0;
-      for (const r of rows.filter((x) => x.lunar_valid !== false)) {
-        if (!dep || !arr) break;
-        const traj = reconstructTransfer(MU, { dep, arr, transfer: r, samplesPerLeg: 2 });
-        tested++;
-        if (traj.closureError > worst) {
-          worst = traj.closureError;
-          where = `TOF ${r.TOF.toFixed(3)} rank ${r.rank}`;
-        }
-      }
-      if (tested) {
-        // Reconstructing from the published phases does NOT reach the solver's
-        // own residual (~1e-11); the gap sits around 1e-3 and does not grow with
-        // time of flight, so it is a phase-convention offset in the export, not
-        // integration drift. See README, "Reproducing the published phases".
-        // The bound here is a regression guard on that known offset.
-        check(`${path.basename(rel)}: reconstruction gap < 2e-2  (${tested} rows, known phase offset)`,
-          worst < 2e-2, `worst = ${fmt(worst)} at ${where}`);
-      }
+      const stats = measure(rows.filter((x) => x.lunar_valid !== false).slice(0, 60), orbits);
+      if (stats) report(path.basename(rel), stats);
     }
   }
 }

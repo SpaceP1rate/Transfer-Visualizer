@@ -203,7 +203,6 @@ export default function Sidebar() {
               <span className="swatch"><i style={{ background: status.critical }} />Lunar impact</span>
             </>
           )}
-          <span className="swatch"><i className="dot" style={{ background: ink.secondary }} />Libration point</span>
         </div>
       </div>
     </aside>

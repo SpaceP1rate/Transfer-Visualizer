@@ -252,6 +252,7 @@ export async function readEdgeFile(buffer, opts = {}) {
       names: table.names,
       totalRows: table.nrows,
       keptRows: reduced.length,
+      truncated: mat.truncated === true,
       mu: mat.vars.get('mu')?.value?.[0] ?? null,
       cDep: mat.vars.get('C_dep')?.value?.[0] ?? null,
       cArr: mat.vars.get('C_arr')?.value?.[0] ?? null,

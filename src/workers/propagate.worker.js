@@ -9,7 +9,7 @@
 
 import { makeDerivs, integrate, moonDistance } from '../lib/cr3bp.js';
 import { Family, STRIDE } from '../lib/catalog.js';
-import { reconstructTransfer, fitPhases } from '../lib/trajectory.js';
+import { reconstructTransfer } from '../lib/trajectory.js';
 import { readEdgeFile } from '../lib/mat-table.js';
 
 /** @type {Map<string, Family>} */
@@ -112,18 +112,10 @@ const handlers = {
     };
   },
 
-  /** Solve for the phases that close the arc, and report the correction. */
-  fitPhases({ dep, arr, transfer, N }) {
-    return fitPhases(MU, { dep: orbitFrom(dep), arr: orbitFrom(arr), transfer, N });
-  },
-
   /** Reconstruct one impulsive transfer. */
-  transfer({ dep, arr, transfer, samplesPerLeg = 320, phases = null }) {
-    const row = phases
-      ? { ...transfer, departure_phase: phases.departurePhase, arrival_phase: phases.arrivalPhase }
-      : transfer;
+  transfer({ dep, arr, transfer, samplesPerLeg = 320, N }) {
     const result = reconstructTransfer(MU, {
-      dep: orbitFrom(dep), arr: orbitFrom(arr), transfer: row, samplesPerLeg,
+      dep: orbitFrom(dep), arr: orbitFrom(arr), transfer, samplesPerLeg, N,
     });
     const buffers = result.legs.map((l) => l.positions.buffer);
     return {

@@ -24,9 +24,18 @@ const DIR = path.join(ROOT, 'public', 'data', 'solutions');
 
 const range = (xs) => (xs.length ? [Math.min(...xs), Math.max(...xs)] : null);
 
+/**
+ * `edges_*` folders hold the raw solver output: hundreds of megabytes of .mat
+ * that .gitignore excludes and no browser should fetch. They are input to
+ * scripts/reduce_solutions.mjs, not something the site can serve, so the index
+ * never lists them.
+ */
+const RAW = /^edges[_-]/i;
+
 async function walk(dir, prefix = '', depth = 0, out = []) {
   if (depth > 4) return out;
   for (const e of await readdir(dir, { withFileTypes: true })) {
+    if (e.isDirectory() && RAW.test(e.name)) continue;
     const rel = prefix ? `${prefix}/${e.name}` : e.name;
     if (e.isDirectory()) await walk(path.join(dir, e.name), rel, depth + 1, out);
     else out.push(rel);

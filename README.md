@@ -82,15 +82,24 @@ The MATLAB driver saves one `edge_<DEP>_<dd>_to_<ARR>_<aa>.mat` per orbit pairin
 under `edges_<DEP>_to_<ARR>/`. A full run is of order a million converged rows per
 family pair — far too much to commit.
 
-`scripts/export_edges.m` reduces a folder of those to the CSV the site reads. Per
-(pairing, TOF slice) it keeps the minimum-Δv solution plus up to two more that are
-genuinely *distinct* branches (first burn differing in direction or magnitude),
-and records how many seeds converged there so the density of the multistart stays
-visible without shipping it.
+`scripts/reduce_solutions.mjs` turns those folders into the CSVs the site reads.
+Per (pairing, TOF slice) it keeps the minimum-Δv solution plus up to two more that
+are genuinely *distinct* branches (first burn differing in direction or
+magnitude), and records how many seeds converged there so the density of the
+multistart stays visible without shipping it.
 
-```matlab
-export_edges('edges_L1_Halo_to_L2_Halo', 'site_data')
+```bash
+node scripts/reduce_solutions.mjs      # every edges_* folder under solutions/
+node scripts/build_data_index.mjs
 ```
+
+It needs neither MATLAB nor any npm package — the MAT reader is in
+`src/lib/mat.js`. On one study: **10.3M solutions across 401 files and 804 MB
+became 72k rows and 21 MB, in about 15 seconds**. `scripts/export_edges.m` does
+the same job inside MATLAB if you prefer.
+
+The `edges_*` folders are matched by `.gitignore` and skipped by the indexer, so
+the raw output stays on disk and only the reduced CSVs are committed.
 
 ---
 
@@ -110,7 +119,7 @@ public/data/solutions/
   <pair>/n<k>/*.csv                     k-impulse solutions
   <pair>/transfers*_n<k>.csv            the same, flat
   transfers_<DEP>_to_<ARR>_n<k>.csv     flat at the root
-  edges_<DEP>_to_<ARR>/edge_*.mat       the solver's raw output, read as-is
+  edges_<DEP>_to_<ARR>_n<k>/edge_*.mat  raw solver output — reduce it, see below
 ```
 
 The **impulse selector is the folder list**. It offers exactly the `n<k>`
@@ -122,9 +131,9 @@ be selected. Within a file the reader still discovers how many `dvN_*` and
 `t_legN` columns are actually present, which is what lets a run with a zero
 midcourse burn read correctly.
 
-`edge_*.mat` files are read directly in the browser (see below), which skips the
-MATLAB export step — but a full run is of order a million rows per family pair,
-so `scripts/export_edges.m` is the practical route for anything committed.
+`edge_*.mat` files are read directly, with no MATLAB step (see below) — but a
+full run is of order a million rows per family pair, so they are reduced at build
+time rather than served.
 
 ### CSV columns
 
@@ -169,59 +178,58 @@ hardcoding their positions, which have moved between MATLAB releases,
 `extractTables` finds them by shape, so an unfamiliar layout fails loudly
 instead of returning shifted columns.
 
-A pairing file is ~22k solutions and about 1.8 MB, which decompresses to ~7.5 MB.
-Parsing and reducing one takes ~0.4 s, and it happens in the worker pool, so a
-100-pairing sweep reads in roughly ten seconds with a progress bar and neither
-the raw rows nor the decompressed subsystem ever reach the main thread.
+A pairing file is 22k-37k solutions and a few megabytes, decompressing to ~7.5 MB.
+Parsing and reducing one takes well under a second.
 
-### Reproducing the published phases
+**Truncated files are recovered rather than dropped.** A run interrupted mid-save
+leaves the final deflate block unterminated; strict inflation rejects the whole
+file with a bare `Z_BUF_ERROR`, losing a whole pairing over a missing checksum.
+Under Node the reader retries with `Z_SYNC_FLUSH`, keeps what is there, and says
+which files it did that for.
 
-Reconstructing an arc from the exported `Departure_Phase` / `Arrival_Phase` does
-**not** land on the arrival orbit to the solver's own accuracy. Measured over one
-pairing file, 60 rank-1 arcs:
+### The phase convention
 
-| quantity | value |
+`departure_phase` and `arrival_phase` are **not** "propagate the orbit for
+`phase x period`". Reading them that way leaves the arc a few hundred kilometres
+short of the arrival orbit, and no amount of adjusting the phases closes the gap,
+because the discrepancy is in the state rather than the timing.
+
+The MATLAB run precomputes a table of `N = 360` states at `linspace(0, T, N)` and
+reads it back by linear interpolation at continuous index `phase x N + 1`
+(1-based; `check_solution.m` lines 167-171):
+
+```matlab
+idx_lo = floor(theta * N_phase) + 1;
+idx_hi = mod(idx_lo, N_phase) + 1;
+alpha  = (theta * N_phase) - floor(theta * N_phase);
+X0_dep = (1-alpha)*X_dep(idx_lo,:) + alpha*X_dep(idx_hi,:);
+```
+
+Two things follow, and both matter:
+
+- **the effective time is `phase x T x N/(N-1)`**, not `phase x T` — index
+  `phase x N` in steps of `T/(N-1)` is not the same thing;
+- **the state is a chord between two table entries**, not a point on the orbit.
+  With 360 samples over a period the chord sits of order 1e-4 nd off the orbit,
+  and the solver converged its burns against *that* state.
+
+`phaseState` in `src/lib/trajectory.js` reproduces it exactly. Measured over 120
+arcs of `L1_Halo_to_L2_Halo`:
+
+| how the endpoints are taken | gap to the arrival orbit |
 |---|---|
-| stored `Position_Residual` | ≤ 1.3e-9 |
-| gap using the published phases, median | 1.2e-3 (≈ 480 km) |
-| gap to the *nearest* point on the arrival orbit | 2.6e-4 (≈ 100 km) |
-| gap after fitting both phases, median | **1.7e-9** |
-| phase correction needed, mean | +0.21 / +0.83 cells of 1/360 |
+| propagating to `phase x period` | 1.8e-3 (≈ 700 km) |
+| the run's phase-array convention | **2.0e-9 median, 1.1e-7 worst** |
 
-The last two rows are the finding: **the burns, the time of flight and the orbits
-are all exactly right.** Correcting the two reported phases by a fraction of one
-phase-array cell brings the arc back to 1.7e-9 — the solver's own residual. So
-this is a reporting error in the phase labels, not a physics or accuracy problem.
+2e-9 is the solver's own `Position_Residual`, so the reconstruction is exact and
+nothing needs fitting or correcting. `PHASE_RESOLUTION` is the run's `N`; a study
+that used a different table size must set it to match, which is why
+`check_solution.m` carries the comment *"must match what was used"*.
 
-Four checks rule out the alternatives:
-
-- it is not integration error — the gap does not grow with time of flight, a TOF
-  of 0.1 shows the same ~3e-3 as a TOF of 2.7;
-- it is not the phase array's resolution — linear interpolation of a 360-point
-  array gives the same answer as exact propagation to the phase;
-- it is not the loose tolerance on those arrays — reproducing `ode89`'s
-  `RelTol 1e-7 / AbsTol 1e-8` moves the endpoint states by only ~2e-6, which is a
-  floor on reproducibility but two orders too small;
-- it is not a clean off-by-one either — adding exactly `1/360` to the arrival
-  phase improves the median from 1.2e-3 to 3.2e-4 but does not close it, and the
-  per-arc correction scatters between 0 and ~1.8 cells.
-
-That signature — a correction under one grid cell, varying per arc — is what a
-phase reported from the **phase-array index** rather than the continuous value
-the solver optimised looks like, with the arrival index about one cell short.
-The fix at the source is for `solve_direct_transfer.m` to report the continuous
-`theta` it actually used, and to check the index-to-phase mapping (1-based index
-`i` corresponds to phase `(i-1)/(N-1)` for `linspace(0, T, N)`).
-
-Because this is an exact-solution viewer, the site **always** solves for the
-phases that close the arc before drawing it, so every trajectory on screen truly
-connects its two orbits. There is no toggle. The readout reports what that cost:
-the endpoint match achieved and the phase correction applied, in cells of
-`1/360`. On data whose phases are already exact the correction reads `+0.00 /
-+0.00` and the match reads `0 km`, so the display doubles as a check on the
-export.
-
-Fitting costs about 40 ms per arc and runs in the worker pool.
+The size of the error if you get this wrong scales with how unstable the orbit
+is — it is barely visible on a small Lyapunov near L1 and reaches several
+thousand kilometres on a large halo — which is what makes it easy to mistake for
+an integration problem.
 
 ---
 
@@ -332,8 +340,8 @@ scripts/
   fetch_orbits.mjs          refresh the catalog from JPL (build time only)
   build_study.mjs           reproduce sample_family from the catalog
   build_data_index.mjs      index committed transfer CSVs
-  export_edges.m            MATLAB: reduce edge_*.mat -> site CSV
-  make_sample_transfers.mjs generate a demo dataset by solving the BVP
+  reduce_solutions.mjs      raw edge_*.mat -> committed solution CSVs
+  export_edges.m            the same reduction inside MATLAB, if preferred
   acceptance.mjs            npm test
 src/lib/
   cr3bp.js                  equations of motion, DP5(4) with dense output
@@ -345,10 +353,6 @@ src/lib/
   source.js                 repository vs local-folder data sources
 src/components/             Scene, Sidebar, DvSurface, Readout
 ```
-
-The demo dataset under `public/data/transfers/*_DEMO/` is generated by
-`make_sample_transfers.mjs` — real converged two-impulse solutions from a coarse
-phase grid, not research data. Delete that folder once the real exports land.
 
 Nothing under `.mat` is committed: the source catalog and the solver's
 `edge_*.mat` files stay with the research code, and the repository carries only

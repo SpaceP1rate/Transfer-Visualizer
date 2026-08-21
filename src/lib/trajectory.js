@@ -19,6 +19,65 @@ const ATOL = 1e-11;
 const stepper6 = new Dopri5(6);
 
 /**
+ * Phase-array resolution the study ran at — the `N` in the MATLAB driver.
+ * It is part of the solution's definition, not a display choice: see below.
+ */
+export const PHASE_RESOLUTION = 360;
+
+/**
+ * State on a periodic orbit at a given phase, reproducing the convention the
+ * solver used.
+ *
+ * This is NOT `propagate(ic, phase * period)`. The MATLAB run precomputes a
+ * table of N states at `linspace(0, T, N)` and reads it back by linear
+ * interpolation at continuous index `phase * N + 1` (1-based). Two things
+ * follow, and both matter:
+ *
+ *   - the effective time is `phase * T * N / (N - 1)`, because index `phase*N`
+ *     steps of size `T/(N-1)` is not `phase*T`;
+ *   - the state is a chord between two table entries, not a point on the orbit.
+ *
+ * The solver converged its burns against exactly that state, so reproducing it
+ * is what makes an arc close. Propagating to `phase * T` instead leaves a gap of
+ * order 1e-3 nd — a few hundred km — which grows with how unstable the orbit is,
+ * and no adjustment of the phases can remove it because the discrepancy is in
+ * the state, not the timing.
+ *
+ * @param {number} N table resolution; must match the run.
+ */
+export function phaseState(mu, orbit, phase, N = PHASE_RESOLUTION, out = new Float64Array(6)) {
+  const table = phaseTable(mu, orbit, N);
+  const th = phase - Math.floor(phase);
+  const x = th * N;
+  const lo = Math.min(N - 1, Math.floor(x));
+  const hi = (lo + 1) % N;          // the table wraps: row N-1 and row 0 coincide
+  const w = x - lo;
+  for (let k = 0; k < 6; k++) out[k] = (1 - w) * table[lo * 6 + k] + w * table[hi * 6 + k];
+  return out;
+}
+
+// Building a table costs one propagation, and the same handful of orbits is
+// asked for over and over as the time-of-flight slider moves.
+const phaseTables = new Map();
+const TABLE_CACHE = 64;
+
+function phaseTable(mu, orbit, N) {
+  const key = `${mu}|${N}|${orbit.period}|${Array.prototype.join.call(orbit.ic, ',')}`;
+  const hit = phaseTables.get(key);
+  if (hit) return hit;
+
+  const table = new Float64Array(N * 6);
+  integrate(makeDerivs(mu), orbit.ic, orbit.period, {
+    rtol: 1e-12, atol: 1e-12, nSamples: N, stepper: stepper6,
+    onSample: (_t, y, i) => table.set(y, i * 6),
+  });
+
+  if (phaseTables.size >= TABLE_CACHE) phaseTables.delete(phaseTables.keys().next().value);
+  phaseTables.set(key, table);
+  return table;
+}
+
+/**
  * Propagate a state for duration T, sampling `nSamples` points.
  * @returns {{positions: Float32Array, states: Float64Array, final: Float64Array,
  *            minMoonDist: number, jacobi: number}}
@@ -77,16 +136,12 @@ export function propagatePeriodicOrbit(mu, orbit, nSamples = 600) {
  * @returns {{legs: Array, impulses: Array, endState: Float64Array,
  *            minMoonDist: number, closureError: number|null, totalDv: number}}
  */
-export function reconstructTransfer(mu, { dep, arr, transfer, samplesPerLeg = 300 }) {
+export function reconstructTransfer(mu, { dep, arr, transfer, samplesPerLeg = 300, N = PHASE_RESOLUTION }) {
   const f = makeDerivs(mu);
   const t = transfer;
 
-  // Departure state: coast along the departure orbit to its phase.
-  let X = Float64Array.from(
-    integrate(f, dep.ic, (t.departure_phase ?? 0) * dep.period, {
-      rtol: RTOL, atol: ATOL, stepper: stepper6,
-    })
-  );
+  // Departure state, read off the phase array exactly as the solver did.
+  let X = Float64Array.from(phaseState(mu, dep, t.departure_phase ?? 0, N));
 
   const legs = [];
   const impulses = [];
@@ -142,9 +197,7 @@ export function reconstructTransfer(mu, { dep, arr, transfer, samplesPerLeg = 30
   // MATLAB solver enforced, so this doubles as a cross-implementation check.
   let closureError = null;
   if (arr) {
-    const target = integrate(f, arr.ic, (t.arrival_phase ?? 0) * arr.period, {
-      rtol: RTOL, atol: ATOL, stepper: stepper6,
-    });
+    const target = phaseState(mu, arr, t.arrival_phase ?? 0, N);
     closureError = Math.hypot(X[0] - target[0], X[1] - target[1], X[2] - target[2]);
   }
 
@@ -168,55 +221,6 @@ export function reconstructTransfer(mu, { dep, arr, transfer, samplesPerLeg = 30
  * @param {number} N phase-array resolution used by the run, for reporting the
  *                   correction in grid cells (the driver's `N`, default 360)
  */
-export function fitPhases(mu, { dep, arr, transfer, N = 360, maxIter = 60 } = {}) {
-  const f = makeDerivs(mu);
-  const t = transfer;
-  const dv = t.dvs[0]?.v ?? [0, 0, 0];
-
-  const miss = (dTh, aTh) => {
-    const X = Float64Array.from(
-      integrate(f, dep.ic, dTh * dep.period, { rtol: RTOL, atol: ATOL, stepper: stepper6 })
-    );
-    X[3] += dv[0]; X[4] += dv[1]; X[5] += dv[2];
-    let s = X;
-    for (let i = 0; i < t.coasts.length; i++) {
-      if (i > 0) {
-        const d = t.dvs[i]?.v ?? [0, 0, 0];
-        s = Float64Array.from(s);
-        s[3] += d[0]; s[4] += d[1]; s[5] += d[2];
-      }
-      s = integrate(f, s, t.coasts[i], { rtol: RTOL, atol: ATOL, stepper: stepper6 });
-      s = Float64Array.from(s);
-    }
-    const T = integrate(f, arr.ic, aTh * arr.period, { rtol: RTOL, atol: ATOL, stepper: stepper6 });
-    return Math.hypot(s[0] - T[0], s[1] - T[1], s[2] - T[2]);
-  };
-
-  const d0 = t.departure_phase ?? 0, a0 = t.arrival_phase ?? 0;
-  const before = miss(d0, a0);
-  let a = 0, b = 0, step = 4 / N;
-  let cur = before;
-
-  for (let it = 0; it < maxIter && step > 1e-11; it++) {
-    let moved = false;
-    for (const [da, db] of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
-      const m = miss(d0 + a + da, a0 + b + db);
-      if (m < cur) { a += da; b += db; cur = m; moved = true; break; }
-    }
-    if (!moved) step *= 0.5;
-  }
-
-  return {
-    departurePhase: d0 + a,
-    arrivalPhase: a0 + b,
-    gapBefore: before,
-    gapAfter: cur,
-    cellsDep: a * N,
-    cellsArr: b * N,
-    N,
-  };
-}
-
 /**
  * Batch-propagate a whole family for the background sweep. Returns one
  * concatenated position buffer plus the index ranges of each orbit, which lets

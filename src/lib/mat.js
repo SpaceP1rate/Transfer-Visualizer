@@ -182,12 +182,49 @@ function parseMatrix(dv, le, start, end) {
   return { kind: 'num', name, dims, value, logical };
 }
 
-async function inflate(bytes) {
-  // MAT stores zlib-wrapped deflate, which is what DecompressionStream('deflate')
-  // expects (as opposed to 'deflate-raw').
-  const ds = new DecompressionStream('deflate');
-  const stream = new Blob([bytes]).stream().pipeThrough(ds);
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+/**
+ * MAT stores zlib-wrapped deflate, which is what DecompressionStream('deflate')
+ * expects (as opposed to 'deflate-raw').
+ *
+ * A solver run that was interrupted mid-save leaves the final deflate block
+ * unterminated. The stream is otherwise complete and every row but the last few
+ * is recoverable, but strict inflation rejects the whole thing with a bare
+ * Z_BUF_ERROR — which loses an entire pairing over a missing checksum. Under
+ * Node the retry finishes with Z_SYNC_FLUSH and keeps what is there; browsers
+ * have no permissive mode, so there the failure stands with a clear message.
+ */
+async function inflate(bytes, stats) {
+  try {
+    const ds = new DecompressionStream('deflate');
+    const stream = new Blob([bytes]).stream().pipeThrough(ds);
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch (err) {
+    const recovered = await inflateTruncated(bytes);
+    if (recovered) {
+      if (stats) stats.truncated = true;
+      return recovered;
+    }
+    throw new Error(
+      'a compressed block could not be inflated — the file looks corrupt or was ' +
+      'truncated mid-save'
+    );
+  }
+}
+
+async function inflateTruncated(bytes) {
+  if (!globalThis.process?.versions?.node) return null;
+  try {
+    // Computed specifier so bundlers do not try to resolve node:zlib for the
+    // browser build.
+    const spec = 'node:zlib';
+    const zlib = await import(/* @vite-ignore */ spec);
+    return await new Promise((resolve) => {
+      zlib.inflate(bytes, { finishFlush: zlib.constants.Z_SYNC_FLUSH }, (e, buf) =>
+        resolve(e ? null : new Uint8Array(buf)));
+    });
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -212,12 +249,15 @@ export async function readMat(input) {
   const c = new Cursor(dv, le, 128, bytes.byteLength);
 
   const vars = new Map();
+  const stats = { truncated: false };
   let subsystem = null;
 
   while (!c.atEnd()) {
     const t = c.next();
     if (t.type === miCOMPRESSED) {
-      const raw = await inflate(new Uint8Array(bytes.buffer, bytes.byteOffset + t.dataOff, t.nbytes));
+      const raw = await inflate(
+        new Uint8Array(bytes.buffer, bytes.byteOffset + t.dataOff, t.nbytes), stats
+      );
       const idv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
       const ic = new Cursor(idv, le, 0, raw.byteLength);
       const it = ic.next();
@@ -232,7 +272,7 @@ export async function readMat(input) {
     }
   }
 
-  return { header, vars, subsystem, littleEndian: le };
+  return { header, vars, subsystem, littleEndian: le, truncated: stats.truncated };
 }
 
 // MATLAB writes the MCOS subsystem as a trailing, unnamed uint8 variable.

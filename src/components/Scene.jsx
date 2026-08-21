@@ -5,7 +5,7 @@ import * as THREE from 'three';
 
 import { useStore, solutionAt, orbitFor } from '../store.js';
 import { useAsync, toPoints } from '../hooks.js';
-import { propagateOrbitAsync, familySweepAsync, transferAsync, fitPhasesAsync } from '../lib/propagator-client.js';
+import { propagateOrbitAsync, familySweepAsync, transferAsync } from '../lib/propagator-client.js';
 import { ink, series, status, ramp } from '../theme.js';
 
 /**
@@ -20,30 +20,45 @@ import { ink, series, status, ramp } from '../theme.js';
  * should do — a world-sized sphere is invisible when zoomed out and swallows the
  * trajectory when zoomed in.
  */
-function makeDotTexture() {
+function makeMarkerTexture(kind) {
   const S = 64;
   const c = document.createElement('canvas');
   c.width = c.height = S;
   const g = c.getContext('2d');
   g.clearRect(0, 0, S, S);
-  g.beginPath();
-  g.arc(S / 2, S / 2, S * 0.42, 0, Math.PI * 2);
-  g.fillStyle = ink.page;
-  g.fill();
-  g.beginPath();
-  g.arc(S / 2, S / 2, S * 0.30, 0, Math.PI * 2);
-  g.fillStyle = '#ffffff';
-  g.fill();
+
+  if (kind === 'cross') {
+    // Libration points are locations, not events, so they get a different mark
+    // from an impulse: a thin cross reads as a coordinate and never looks like
+    // a burn or a body.
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = S * 0.09;
+    g.lineCap = 'butt';
+    g.beginPath();
+    g.moveTo(S * 0.12, S / 2); g.lineTo(S * 0.88, S / 2);
+    g.moveTo(S / 2, S * 0.12); g.lineTo(S / 2, S * 0.88);
+    g.stroke();
+  } else {
+    g.beginPath();
+    g.arc(S / 2, S / 2, S * 0.42, 0, Math.PI * 2);
+    g.fillStyle = ink.page;
+    g.fill();
+    g.beginPath();
+    g.arc(S / 2, S / 2, S * 0.30, 0, Math.PI * 2);
+    g.fillStyle = '#ffffff';
+    g.fill();
+  }
+
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
-let dotTexture = null;
-const getDot = () => (dotTexture ??= makeDotTexture());
+const markerTextures = {};
+const getMarker = (kind = 'dot') => (markerTextures[kind] ??= makeMarkerTexture(kind));
 
 /** Fixed-pixel-size markers at a list of positions. */
-function Markers({ positions, color, size = 7, depthTest = true }) {
+function Markers({ positions, color, size = 7, depthTest = true, kind = 'dot' }) {
   const geom = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(positions.flat(), 3));
@@ -54,7 +69,7 @@ function Markers({ positions, color, size = 7, depthTest = true }) {
   return (
     <points geometry={geom}>
       <pointsMaterial
-        map={getDot()}
+        map={getMarker(kind)}
         color={color}
         size={size}
         sizeAttenuation={false}
@@ -89,7 +104,7 @@ function Bodies() {
 
       {showLagrange && (
         <>
-          <Markers positions={Object.values(L)} color={ink.secondary} size={6} />
+          <Markers positions={Object.values(L)} color={ink.secondary} size={11} kind="cross" />
           {Object.entries(L).map(([name, p]) => (
             <Html key={name} position={p} center style={{ ...labelStyle, transform: 'translate(13px,-9px)' }}>
               {name}
@@ -137,22 +152,72 @@ function librationPoints(mu) {
   };
 }
 
-/** Faint reference grid on the orbital plane, one square per 0.1 nd. */
+/**
+ * Reference grid on the orbital plane.
+ *
+ * Two nested scales — 0.1 nd near the origin, 0.5 nd out to 8 — each faded to
+ * nothing at its own edge by per-vertex alpha. A grid that simply stops draws a
+ * hard rectangle in the middle of empty space and makes the scene look like it
+ * sits on a table; fading it means there is never a visible boundary, so it
+ * reads as an infinite plane at any zoom.
+ */
 function ReferenceGrid() {
   const geom = useMemo(() => {
-    const pts = [];
-    const R = 1.4, step = 0.1;
-    for (let v = -R; v <= R + 1e-9; v += step) {
-      pts.push(-R, v, 0, R, v, 0);
-      pts.push(v, -R, 0, v, R, 0);
+    const pos = [];
+    const col = [];
+    const base = new THREE.Color(ink.axis);
+
+    // Flat over most of the disc, dropping off only near the rim: fading the
+    // whole thing evenly would just make a dim grid, and the point is that it
+    // has no visible edge.
+    const alpha = (x, y, R) => {
+      const r = Math.min(1, Math.hypot(x, y) / R);
+      const r4 = r * r * r * r;
+      return 1 - r4;
+    };
+
+    // Each line is subdivided rather than drawn end to end. A single segment has
+    // only its two endpoints to carry alpha, and every endpoint here sits on the
+    // rim where alpha is zero — so an unsubdivided grid fades to nothing along
+    // its entire length and disappears completely.
+    const SEG = 48;
+    const addLine = (ax, ay, bx, by, R, weight) => {
+      let px = ax, py = ay, pa = alpha(ax, ay, R) * weight;
+      for (let i = 1; i <= SEG; i++) {
+        const t = i / SEG;
+        const x = ax + (bx - ax) * t;
+        const y = ay + (by - ay) * t;
+        const a = alpha(x, y, R) * weight;
+        pos.push(px, py, 0, x, y, 0);
+        col.push(base.r, base.g, base.b, pa, base.r, base.g, base.b, a);
+        px = x; py = y; pa = a;
+      }
+    };
+
+    // Fine grid close in, coarse grid far out. The coarse one carries past where
+    // the fine one has faded, so there is no ring where the detail changes.
+    for (const [R, step, weight] of [[1.7, 0.1, 1.0], [9, 0.5, 0.75]]) {
+      const n = Math.round(R / step);
+      for (let i = -n; i <= n; i++) {
+        const v = i * step;
+        const half = Math.sqrt(Math.max(0, R * R - v * v));
+        if (half <= 1e-9) continue;
+        addLine(-half, v, half, v, R, weight);
+        addLine(v, -half, v, half, R, weight);
+      }
     }
+
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
     return g;
   }, []);
+
+  useEffect(() => () => geom.dispose(), [geom]);
+
   return (
-    <lineSegments geometry={geom}>
-      <lineBasicMaterial color={ink.grid} transparent opacity={0.55} />
+    <lineSegments geometry={geom} renderOrder={-1}>
+      <lineBasicMaterial vertexColors transparent depthWrite={false} />
     </lineSegments>
   );
 }
@@ -161,14 +226,32 @@ function ReferenceGrid() {
  * A whole family drawn as one LineSegments, coloured by Jacobi constant along
  * the sequential ramp. One draw call regardless of how many members are shown.
  */
-function FamilySweep({ familyKey, count, opacity = 0.42 }) {
+/**
+ * @param {[number, number]|null} jacobiWindow limit the members drawn to this
+ *        Jacobi range. With a solution loaded this is the C span the surface
+ *        actually covers, so the sweep shows the family the study sampled from
+ *        rather than the whole catalog branch — an L1 halo family runs from
+ *        C 2.41 up to 3.17, and its low-C end is the near-rectilinear geometry
+ *        that reads as a completely different family on screen.
+ */
+function FamilySweep({ familyKey, count, opacity = 0.42, jacobiWindow = null }) {
   const fam = useStore((s) => s.families.get(familyKey));
+  const win = jacobiWindow ? `${jacobiWindow[0]}:${jacobiWindow[1]}` : 'all';
+
   const [data] = useAsync(() => {
     if (!fam) return null;
-    return familySweepAsync(
-      familyKey, fam.sampleIndices(count), 160, fam.meta.jacobiRange, `sweep:${familyKey}`
-    );
-  }, [familyKey, fam, count]);
+    let indices;
+    if (jacobiWindow) {
+      const inRange = fam.inJacobiRange(jacobiWindow[0], jacobiWindow[1]);
+      if (!inRange.length) return null;
+      const step = Math.max(1, Math.floor(inRange.length / count));
+      indices = inRange.filter((_, i) => i % step === 0);
+    } else {
+      indices = fam.sampleIndices(count);
+    }
+    const range = jacobiWindow ?? fam.meta.jacobiRange;
+    return familySweepAsync(familyKey, indices, 160, range, `sweep:${familyKey}`);
+  }, [familyKey, fam, count, win]);
 
   const geom = useMemo(() => {
     if (!data) return null;
@@ -209,15 +292,13 @@ function PeriodicOrbit({ orbit, color, opacity = 1, width = 2 }) {
 
 /** One reconstructed transfer: coast arcs plus a marker at every impulse. */
 function Transfer({ dep, arr, row, color, dashed = false, showImpulses = true, channel }) {
-  // Every arc drawn here is an exact solution: the departure and arrival phases
-  // are solved for so the trajectory truly connects the two orbits, rather than
-  // trusting the exported labels, which carry a sub-cell reporting offset.
   const [data] = useAsync(() => {
     if (!dep || !arr || !row) return null;
-    const d = { ic: Array.from(dep.ic), period: dep.period };
-    const a = { ic: Array.from(arr.ic), period: arr.period };
-    return fitPhasesAsync(d, a, row, 360, `${channel}:fit`)
-      .then((fit) => transferAsync(d, a, row, 340, channel, fit));
+    return transferAsync(
+      { ic: Array.from(dep.ic), period: dep.period },
+      { ic: Array.from(arr.ic), period: arr.period },
+      row, 340, channel
+    );
   }, [dep?.id, arr?.id, row, channel]);
 
   const legs = useMemo(() => (data ? data.legs.map((l) => toPoints(l.positions)) : []), [data]);
@@ -342,6 +423,25 @@ export default function Scene() {
   // the member slider bring detail back on demand.
   const catalogSweepCount = Math.min(40, Math.max(12, Math.round(sweepCount / 3)));
 
+  // The Jacobi span each family actually contributes to the loaded surface,
+  // taken from the orbits the run used rather than from the catalog extent.
+  const jacobiWindows = useMemo(() => {
+    const out = {};
+    if (!pairData?.orbits) return out;
+    for (const o of pairData.orbits.values()) {
+      if (!o.family || !Number.isFinite(o.jacobi)) continue;
+      const w = out[o.family];
+      out[o.family] = w ? [Math.min(w[0], o.jacobi), Math.max(w[1], o.jacobi)] : [o.jacobi, o.jacobi];
+    }
+    // A hair of margin so the endpoint members are never clipped by rounding.
+    for (const k of Object.keys(out)) {
+      const [lo, hi] = out[k];
+      const pad = Math.max(1e-6, (hi - lo) * 0.02);
+      out[k] = [lo - pad, hi + pad];
+    }
+    return out;
+  }, [pairData]);
+
   if (!system) return null;
 
   return (
@@ -358,10 +458,13 @@ export default function Scene() {
       <Bodies />
 
       {showSweep && (hasSolutions
-        // With solutions loaded, only the two families in play are drawn.
+        // With solutions loaded, only the two families in play are drawn, and
+        // only across the Jacobi span the loaded surface covers.
         ? [depFamily, arrFamily]
           .filter((k, i, a) => k && a.indexOf(k) === i)
-          .map((k) => <FamilySweep key={k} familyKey={k} count={sweepCount} />)
+          .map((k) => (
+            <FamilySweep key={k} familyKey={k} count={sweepCount} jacobiWindow={jacobiWindows[k]} />
+          ))
         // Nothing committed: show the whole catalog, thinned so it stays legible.
         : allFamilies.map((k) => (
           <FamilySweep key={k} familyKey={k} count={catalogSweepCount} opacity={0.3} />
