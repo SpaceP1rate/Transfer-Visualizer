@@ -23,6 +23,12 @@
 
 html, body, #root { height: 100%; margin: 0; }
 
+/* Mobile browsers count the collapsing URL bar in 100vh, so a full-height
+   layout ends up taller than the visible area. dvh tracks what is on screen. */
+@supports (height: 100dvh) {
+  html, body, #root { height: 100dvh; }
+}
+
 body {
   background: var(--page);
   color: var(--ink);
@@ -32,9 +38,17 @@ body {
 
 .app {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  /* Fluid rather than fixed: a 13-inch laptop should not give the same 360px to
+     the controls that a 27-inch monitor does. */
+  grid-template-columns: clamp(300px, 25vw, 380px) 1fr;
   grid-template-rows: 64px 1fr;
   height: 100%;
+  overflow: hidden;
+}
+
+.app.compact {
+  grid-template-columns: 1fr;
+  grid-template-rows: 52px 1fr;
 }
 
 header {
@@ -93,7 +107,11 @@ aside {
   gap: 18px;
 }
 
-main { position: relative; background: var(--page); min-width: 0; }
+main { position: relative; background: var(--page); min-width: 0; min-height: 0; }
+
+/* The 3D view must take the gesture, or a one-finger drag scrolls the page
+   instead of orbiting the camera. */
+main canvas { touch-action: none; }
 
 .panel { display: flex; flex-direction: column; gap: 9px; }
 
@@ -338,3 +356,117 @@ table.mini td.num { text-align: right; color: var(--ink); }
   overflow: hidden;
 }
 .progress i { display: block; height: 100%; background: var(--xfer); transition: width .15s linear; }
+
+/* --- compact layout ------------------------------------------------------ */
+
+.app.compact header { padding: 0 12px; gap: 10px; }
+.app.compact header h1 { font-size: 15px; }
+.app.compact header .byline { font-size: 10px; }
+.app.compact aside {
+  border-right: 0;
+  padding: 0 14px 14px;
+  overflow: visible;
+  background: transparent;
+}
+
+/* The sheet is the scroll container in compact mode, so the panels inside it
+   must not try to scroll independently. */
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  height: min(88dvh, 88%);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.45);
+  transition: transform 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+
+.sheet.dragging { transition: none; }
+
+/* The grip is what stays on screen when the sheet is collapsed — its measured
+   height *is* the peek — so it carries the home-indicator inset itself. */
+.sheet-grip {
+  flex: none;
+  padding: 8px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  cursor: grab;
+  touch-action: none;      /* the grip drags the sheet; it never scrolls */
+  user-select: none;
+}
+
+.sheet-grip:active { cursor: grabbing; }
+
+.sheet-bar {
+  display: block;
+  width: 38px;
+  height: 4px;
+  margin: 0 auto 9px;
+  border-radius: 2px;
+  background: var(--axis);
+}
+
+.sheet-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+}
+.sheet-summary .k { color: var(--ink-2); }
+.sheet-summary .v { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* On a tablet the sheet is wide enough that a single column leaves the numbers
+   stranded at opposite edges of the screen. Two columns keep each block at a
+   readable measure and halve the scrolling. */
+@media (min-width: 600px) {
+  .sheet-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 0 8px;
+  }
+  .app.compact aside { padding-top: 0; }
+}
+
+.readout.inline {
+  position: static;
+  width: auto;
+  max-height: none;
+  margin: 0 14px 16px;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Touch targets: comfortable on a phone, unchanged with a mouse. */
+@media (pointer: coarse) {
+  select, input[type="number"] { padding: 9px 8px; font-size: 14px; }
+  .check { padding: 3px 0; }
+  .check input { width: 18px; height: 18px; }
+  .btn { padding: 9px 8px; }
+  input[type="range"] { height: 28px; }
+}
+
+/* The heatmap scrolls with the sheet vertically but still takes taps. */
+.heatwrap canvas { touch-action: pan-y; }
+
+@media (max-width: 700px) {
+  header .meta.optional-3 { display: none; }
+  label.field { grid-template-columns: 80px 1fr; }
+}

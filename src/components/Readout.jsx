@@ -10,6 +10,42 @@ import { series, status, ink } from '../theme.js';
  * only the per-burn breakdown makes that visible.
  */
 
+/**
+ * The single most useful line about the current selection, for the collapsed
+ * sheet: which pair, and what it costs.
+ */
+export function ReadoutSummary() {
+  const system = useStore((s) => s.system);
+  const pairData = useStore((s) => s.pairData);
+  const depIdx = useStore((s) => s.depIdx);
+  const arrIdx = useStore((s) => s.arrIdx);
+  const sliceIdx = useStore((s) => s.sliceIdx);
+  const nImpulse = useStore((s) => s.nImpulse);
+  const rank = useStore((s) => s.rank);
+  const hideLunarInvalid = useStore((s) => s.hideLunarInvalid);
+
+  const d = useMemo(() => {
+    const st = useStore.getState();
+    if (!st.pairData) return null;
+    const pd = st.pairData;
+    return {
+      dep: pd.depIds[depIdx],
+      arr: pd.arrIds[arrIdx],
+      row: solutionAt(st, nImpulse, depIdx, arrIdx, sliceIdx, rank),
+    };
+  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, rank, hideLunarInvalid]);
+
+  if (!d || !system) return <span className="k">Controls</span>;
+  return (
+    <>
+      <span className="k">{d.dep} → {d.arr}</span>
+      <span className="v">
+        {d.row ? `${(d.row.DV_total * system.vunitKmS * 1000).toFixed(1)} m/s` : 'no solution'}
+      </span>
+    </>
+  );
+}
+
 const Row = ({ k, v, sub, tone }) => (
   <div className="stat-row">
     <span className="k">{k}</span>
@@ -19,7 +55,7 @@ const Row = ({ k, v, sub, tone }) => (
   </div>
 );
 
-export default function Readout() {
+export default function Readout({ inline = false }) {
   const system = useStore((s) => s.system);
   const pairData = useStore((s) => s.pairData);
   const depIdx = useStore((s) => s.depIdx);
@@ -55,9 +91,11 @@ export default function Readout() {
   const { dep, arr, row, compare, alternatives, slice } = d;
 
   return (
-    <div className="card readout">
+    <div className={inline ? 'readout inline' : 'card readout'}>
+      {/* Inline, the sheet's own grip already names the pair a few pixels
+          above, so repeating it here just costs a line. */}
       <div className="stat-row" style={{ paddingBottom: 6 }}>
-        <span className="k">{dep?.id ?? '—'} → {arr?.id ?? '—'}</span>
+        <span className="k">{inline ? '' : `${dep?.id ?? '—'} → ${arr?.id ?? '—'}`}</span>
         <span className="k">{slice ? `TOF ${slice.tof.toFixed(4)}` : ''}</span>
       </div>
 

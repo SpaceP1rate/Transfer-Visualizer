@@ -38,3 +38,22 @@ export function toPoints(flat) {
   for (let i = 0; i < out.length; i++) out[i] = [flat[i * 3], flat[i * 3 + 1], flat[i * 3 + 2]];
   return out;
 }
+
+/**
+ * Track a media query. Layout mode is decided here rather than in CSS alone
+ * because the compact layout is a different component tree — a bottom sheet
+ * instead of a sidebar — not just different rules on the same one.
+ */
+export function useMediaQuery(query) {
+  const [matches, setMatches] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(query).matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const on = () => setMatches(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, [query]);
+  return matches;
+}
