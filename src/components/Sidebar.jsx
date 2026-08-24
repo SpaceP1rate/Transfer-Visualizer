@@ -2,6 +2,18 @@ import { useStore } from '../store.js';
 import DvSurface from './DvSurface.jsx';
 import { series, ink, rampGradient, status } from '../theme.js';
 
+/**
+ * How a phase grid is named in the menu. The side length is always shown — a
+ * run tagged `_p25` says so outright, an untagged one has it recovered from the
+ * seed numbering, and only a non-square seed count falls back to the raw count.
+ */
+function gridLabel(v) {
+  const g = v.grid;
+  if (!g) return v.p ? `${v.p} x ${v.p}` : 'grid';
+  if (g.side) return `${g.side} x ${g.side}${g.exact ? '' : '*'}`;
+  return `${g.seeds.toLocaleString()} seeds`;
+}
+
 function Field({ label, children }) {
   return <label className="field"><span>{label}</span>{children}</label>;
 }
@@ -25,7 +37,6 @@ export default function Sidebar() {
   const variants = useStore((s) => s.variants);
   const nImpulse = useStore((s) => s.nImpulse);
   const phaseRes = useStore((s) => s.phaseRes);
-  const compareWith = useStore((s) => s.compareWith);
   const depIdx = useStore((s) => s.depIdx);
   const arrIdx = useStore((s) => s.arrIdx);
   const sliceIdx = useStore((s) => s.sliceIdx);
@@ -43,9 +54,6 @@ export default function Sidebar() {
   // are what the folders hold — never a free-form number.
   const available = [...new Set(variants.map((v) => v.n))].sort((a, b) => a - b);
   const grids = variants.filter((v) => v.n === nImpulse);
-  const rowsFor = (n) => variants
-    .filter((v) => v.n === n && (v.p ?? null) === phaseRes)
-    .concat(variants.filter((v) => v.n === n))[0]?.rows.length ?? 0;
   const slices = pairData?.slices ?? [];
   const slice = slices[sliceIdx];
   const hasSolutions = pairs.length > 0;
@@ -88,17 +96,13 @@ export default function Sidebar() {
                 set({
                   nImpulse: n,
                   phaseRes: ps.includes(phaseRes) ? phaseRes : (ps[0] ?? null),
-                  // An overlay of the count you just switched to is not an
-                  // overlay; leaving it set would show "none" in the menu while
-                  // the legend claimed otherwise.
-                  compareWith: compareWith === n ? null : compareWith,
                   rank: 1,
                 });
               }}
               disabled={available.length < 2}
             >
               {available.map((n) => (
-                <option key={n} value={n}>{n}-impulse · {rowsFor(n).toLocaleString()} solutions</option>
+                <option key={n} value={n}>{n}-impulse</option>
               ))}
             </select>
           </Field>
@@ -106,10 +110,11 @@ export default function Sidebar() {
           {/* Phase grid is its own axis: n2_p25 and n2_p50 are two solves of the
               same problem at different multistart densities, so switching one
               must not disturb the other. */}
-          {grids.length > 1 && (
+          {grids.length > 0 && (
             <Field label="Phase grid">
               <select
                 value={phaseRes ?? ''}
+                disabled={grids.length < 2}
                 onChange={(e) => set({
                   phaseRes: e.target.value === '' ? null : Number(e.target.value),
                   rank: 1,
@@ -117,26 +122,13 @@ export default function Sidebar() {
               >
                 {grids.map((v) => (
                   <option key={v.key} value={v.p ?? ''}>
-                    {v.p ? `${v.p} x ${v.p} seeds` : 'default'} · {v.rows.length.toLocaleString()} solutions
+                    {gridLabel(v)} · {v.rows.length.toLocaleString()} solutions
                   </option>
                 ))}
               </select>
             </Field>
           )}
 
-          {available.length > 1 && (
-            <Field label="Overlay">
-              <select
-                value={compareWith ?? ''}
-                onChange={(e) => set({ compareWith: e.target.value === '' ? null : Number(e.target.value) })}
-              >
-                <option value="">none</option>
-                {available.filter((n) => n !== nImpulse).map((n) => (
-                  <option key={n} value={n}>{n}-impulse</option>
-                ))}
-              </select>
-            </Field>
-          )}
         </div>
       ) : (
         <div className="panel">
@@ -194,7 +186,6 @@ export default function Sidebar() {
               {pairData.arrIds.map((id, i) => <option key={id} value={i}>{id}</option>)}
             </select>
           </Field>
-          <Check k="hideLunarInvalid" label="Hide arcs that hit the Moon" />
         </div>
       )}
 
@@ -213,13 +204,13 @@ export default function Sidebar() {
         </div>
         <div className="checks">
           <Check k="inertial" label="Inertial frame" />
-          <Check k="showSweep" label="Family sweep" />
+          {!inertial && <Check k="showSweep" label="Family sweep" />}
           <Check k="showGrid" label="Reference grid" />
           {!inertial && <Check k="showLagrange" label="Libration points" />}
         </div>
         {inertial && (
           <div className="rampscale">
-            <span>Earth-centred · epoch at departure</span>
+            <span>Arcs span one time of flight · ghost Moon marks departure</span>
           </div>
         )}
         <div className="slider-row">
@@ -239,21 +230,13 @@ export default function Sidebar() {
         <div className="swatches">
           {hasSolutions && (
             <>
-              {/* Arcs first, in the order the eye meets them along a transfer —
-                  the orbit you leave, the orbit you arrive on, the arc between,
-                  its overlay, and the state that disqualifies an arc. The point
-                  markers come after, so line entries and point entries are never
-                  interleaved. */}
+              {/* Arcs first, in the order the eye meets them along a transfer:
+                  the orbit you leave, the orbit you arrive on, the arc between.
+                  The point markers come after, so line entries and point
+                  entries are never interleaved. */}
               <span className="swatch"><i style={{ background: series.departure }} />Departure orbit</span>
               <span className="swatch"><i style={{ background: series.arrival }} />Arrival orbit</span>
               <span className="swatch"><i style={{ background: series.transfer }} />Transfer, {nImpulse ?? 'n'}-impulse</span>
-              {compareWith != null && compareWith !== nImpulse && (
-                <span className="swatch" style={{ color: series.transferAlt }}>
-                  <i className="dashed" />
-                  <span style={{ color: ink.secondary }}>Transfer, {compareWith}-impulse</span>
-                </span>
-              )}
-              <span className="swatch"><i style={{ background: status.critical }} />Transfer, hits the Moon</span>
               <span className="swatch"><i className="dot" style={{ background: ink.primary }} />Impulse</span>
             </>
           )}

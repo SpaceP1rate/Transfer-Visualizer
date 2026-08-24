@@ -36,7 +36,6 @@ export default function DvSurface() {
   const sliceIdx = useStore((s) => s.sliceIdx);
   const depIdx = useStore((s) => s.depIdx);
   const arrIdx = useStore((s) => s.arrIdx);
-  const hideLunarInvalid = useStore((s) => s.hideLunarInvalid);
   const system = useStore((s) => s.system);
   const setState = useStore((s) => s.set);
 
@@ -57,7 +56,7 @@ export default function DvSurface() {
       max: finite.length ? hi : NaN,
       minCell,
     };
-  }, [pairData, nImpulse, phaseRes, sliceIdx, hideLunarInvalid]);
+  }, [pairData, nImpulse, phaseRes, sliceIdx]);
 
   const nd = grid.nd, na = grid.na;
 

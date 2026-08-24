@@ -80,8 +80,16 @@ export async function shareFamily(family) {
 
 export const setMu = (mu) => getPool().broadcast('setMu', { mu });
 
-export const propagateOrbitAsync = (orbit, samples, channel, t0 = 0, revs = 1) =>
-  getPool().call('orbit', { orbit, samples, t0, revs }, { channel });
+/**
+ * @param {object} [opts] channel, and optionally `phase` / `duration` / `t0` to
+ *        draw a window of the orbit rather than a whole period.
+ */
+export const propagateOrbitAsync = (orbit, samples, opts = {}) =>
+  getPool().call(
+    'orbit',
+    { orbit, samples, t0: opts.t0 ?? 0, phase: opts.phase ?? null, duration: opts.duration ?? null },
+    { channel: opts.channel }
+  );
 
 export const familySweepAsync = (key, indices, samples, jacobiRange, channel) =>
   getPool().callSticky(key, 'familySweep', { key, indices, samples, jacobiRange }, { channel });

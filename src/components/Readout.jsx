@@ -23,7 +23,6 @@ export function ReadoutSummary() {
   const nImpulse = useStore((s) => s.nImpulse);
   const phaseRes = useStore((s) => s.phaseRes);
   const rank = useStore((s) => s.rank);
-  const hideLunarInvalid = useStore((s) => s.hideLunarInvalid);
 
   const d = useMemo(() => {
     const st = useStore.getState();
@@ -34,7 +33,7 @@ export function ReadoutSummary() {
       arr: pd.arrIds[arrIdx],
       row: solutionAt(st, nImpulse, depIdx, arrIdx, sliceIdx, rank),
     };
-  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, phaseRes, rank, hideLunarInvalid]);
+  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, phaseRes, rank]);
 
   if (!d || !system) return <span className="k">Controls</span>;
   return (
@@ -64,9 +63,7 @@ export default function Readout({ inline = false }) {
   const sliceIdx = useStore((s) => s.sliceIdx);
   const nImpulse = useStore((s) => s.nImpulse);
   const phaseRes = useStore((s) => s.phaseRes);
-  const compareWith = useStore((s) => s.compareWith);
   const rank = useStore((s) => s.rank);
-  const hideLunarInvalid = useStore((s) => s.hideLunarInvalid);
   const setState = useStore((s) => s.set);
 
   const d = useMemo(() => {
@@ -78,11 +75,9 @@ export default function Readout({ inline = false }) {
       arr: orbitFor(s, pd.arrIds[arrIdx]),
       row: solutionAt(s, nImpulse, depIdx, arrIdx, sliceIdx, rank),
       alternatives: solutionsAt(s, nImpulse, depIdx, arrIdx, sliceIdx),
-      compare: compareWith != null && compareWith !== nImpulse
-        ? solutionAt(s, compareWith, depIdx, arrIdx, sliceIdx, 1) : null,
       slice: pd.slices[sliceIdx],
     };
-  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, phaseRes, compareWith, rank, hideLunarInvalid]);
+  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, phaseRes, rank]);
 
   if (!system || !d) return null;
   const { vunitKmS, tunitS, lunitKm, moonRadius } = system;
@@ -90,7 +85,7 @@ export default function Readout({ inline = false }) {
   const days = (nd) => `${((nd * tunitS) / 86400).toFixed(2)} d`;
   const km = (nd) => `${(nd * lunitKm).toFixed(0)} km`;
 
-  const { dep, arr, row, compare, alternatives, slice } = d;
+  const { dep, arr, row, alternatives, slice } = d;
 
   return (
     <div className={inline ? 'readout inline' : 'card readout'}>
@@ -111,19 +106,6 @@ export default function Readout({ inline = false }) {
             {ms(row.DV_total)}
             <small>{row.DV_total.toFixed(6)} nd</small>
           </div>
-
-          {compare && (
-            <div className="stat-row" style={{ marginTop: 4 }}>
-              <span className="k">vs {compare.n_impulse}-impulse</span>
-              <span
-                className="v"
-                style={{ color: row.DV_total <= compare.DV_total ? status.good : status.warning }}
-              >
-                {row.DV_total <= compare.DV_total ? '−' : '+'}
-                {Math.abs((row.DV_total - compare.DV_total) * vunitKmS * 1000).toFixed(1)} m/s
-              </span>
-            </div>
-          )}
 
           <hr />
 
@@ -159,22 +141,11 @@ export default function Readout({ inline = false }) {
           <Row k="Arrival phase" v={`${(row.arrival_phase * 100).toFixed(1)}%`} sub="of period" />
 
           {row.min_moon_dist != null && (
-            // Below the surface the distance to the Moon's centre is not a
-            // "closest approach" any more, so quoting it to the kilometre
-            // implies a flyby that never happens.
             <Row
               k="Closest lunar pass"
-              v={row.lunar_valid === false ? '< lunar radius' : km(row.min_moon_dist)}
-              sub={row.lunar_valid === false ? null : `${(row.min_moon_dist / moonRadius).toFixed(1)} R☾`}
-              tone={row.lunar_valid === false ? status.critical : undefined}
+              v={km(row.min_moon_dist)}
+              sub={`${(row.min_moon_dist / moonRadius).toFixed(1)} R☾`}
             />
-          )}
-
-          {row.lunar_valid === false && (
-            <div className="notice critical" style={{ marginTop: 8 }}>
-              <b>Impacts the Moon.</b> This arc passes below the lunar surface and is kept only
-              because the filter is off.
-            </div>
           )}
 
           <hr />

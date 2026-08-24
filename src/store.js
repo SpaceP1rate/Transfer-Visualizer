@@ -88,6 +88,28 @@ function derivePairData(rowsByVariant, orbitsCsv, studyDoc) {
 }
 
 /**
+ * The phase grid a run searched, as a side length.
+ *
+ * The folder name carries it when the run was tagged (`n2_p25`). Older folders
+ * are not, but the rows still say: seeds are numbered 1..n_seeds and the grid is
+ * square, so the largest seed index recovers the side. Anything that is not a
+ * perfect square is reported as a raw seed count rather than guessed at.
+ */
+function gridSize(rows, p) {
+  if (p) return { side: p, seeds: p * p, exact: true };
+  let seeds = 0;
+  for (const r of rows) {
+    const c = Number(r.chain_id);
+    if (Number.isFinite(c) && c > seeds) seeds = c;
+  }
+  if (!seeds) return null;
+  const side = Math.round(Math.sqrt(seeds));
+  return side * side === seeds
+    ? { side, seeds, exact: false }
+    : { side: null, seeds, exact: false };
+}
+
+/**
  * A solve folder may be named for a variant of a run ("..._DEMO", "_v2"), so
  * match it back to the catalog sampling by exact key, then key prefix, then the
  * family names it implies.
@@ -137,13 +159,11 @@ export const useStore = create((set, get) => ({
   pairData: null,
   nImpulse: null,
   phaseRes: null,             // phase-grid resolution, null when the run had one
-  compareWith: null,
 
   depIdx: 0,
   arrIdx: 0,
   sliceIdx: 0,            // index into pairData.slices
   rank: 1,
-  hideLunarInvalid: true,
 
   view: '3D',
   inertial: false,
@@ -205,7 +225,12 @@ export const useStore = create((set, get) => ({
     let orbitsCsv = null;
     const rowsByVariant = new Map();
     const variantMeta = new Map();   // key -> { n, p }
-    const push = (n, p, rows) => {
+    // Arcs that pass below the lunar surface are not solutions of the problem
+    // being posed, so they are dropped on the way in. Every surface, minimum
+    // and readout downstream is therefore over the valid set only, with no
+    // filter to forget to apply.
+    const push = (n, p, all) => {
+      const rows = all.filter((r) => r.lunar_valid !== false);
       if (!rows.length) return;
       const k = variantKey(n, p);
       variantMeta.set(k, { n, p: p ?? null });
@@ -283,7 +308,10 @@ export const useStore = create((set, get) => ({
 
     const pairData = derivePairData(rowsByVariant, orbitsCsv, studyDoc);
     const variants = [...rowsByVariant.entries()]
-      .map(([key, rows]) => ({ key, ...variantMeta.get(key), rows }))
+      .map(([key, rows]) => {
+        const meta = variantMeta.get(key);
+        return { key, ...meta, grid: gridSize(rows, meta.p), rows };
+      })
       .sort((a, b) => a.n - b.n || (a.p ?? 0) - (b.p ?? 0));
 
     // Keep the current selection when the new pair also has it; otherwise fall
@@ -302,7 +330,6 @@ export const useStore = create((set, get) => ({
       arrFamily,
       nImpulse: n,
       phaseRes: p,
-      compareWith: ns.length > 1 ? ns.find((k) => k !== n) ?? null : null,
       depIdx: 0,
       arrIdx: 0,
       sliceIdx: Math.min(get().sliceIdx, Math.max(0, pairData.slices.length - 1)),
@@ -317,8 +344,6 @@ export const useStore = create((set, get) => ({
 // ---------------------------------------------------------------------------
 // Selectors — all read straight out of what the CSV provided.
 // ---------------------------------------------------------------------------
-
-const keep = (state, r) => !(state.hideLunarInvalid && r.lunar_valid === false);
 
 /**
  * The lookup table for an impulse count at the currently selected phase grid.
@@ -348,7 +373,7 @@ export function solutionsAt(state, n, depIdx, arrIdx, sliceIdx) {
   const depId = pd.depIds[depIdx], arrId = pd.arrIds[arrIdx];
   const slice = pd.slices[sliceIdx];
   if (!depId || !arrId || !slice) return [];
-  return (table.get(`${depId}|${arrId}|${slice.idx}`) ?? []).filter((r) => keep(state, r));
+  return table.get(`${depId}|${arrId}|${slice.idx}`) ?? [];
 }
 
 /** The solution the 3D view draws: the requested rank, or the cheapest kept. */

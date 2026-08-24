@@ -194,7 +194,7 @@ function DirectionArrows({ positions, color, count = 6 }) {
   );
 }
 
-function Bodies() {
+function Bodies({ tof = null }) {
   const system = useStore((s) => s.system);
   const showLagrange = useStore((s) => s.showLagrange);
   const inertial = useStore((s) => s.inertial);
@@ -202,10 +202,16 @@ function Bodies() {
 
   const L = useMemo(() => librationPoints(mu), [mu]);
 
-  // Both bodies are drawn at t = 0, where the two frames coincide, so their
-  // positions are unchanged. What the inertial view adds is their paths: the
-  // Moon's circle is the thing every rosette is drawn against, and without it
-  // the picture has no scale.
+  // Where the bodies are on the shared clock. The rotating frame holds them
+  // still by construction; the inertial one carries them round at omega = 1, so
+  // by arrival the Moon has moved through an angle equal to the time of flight.
+  const t = inertial && Number.isFinite(tof) ? tof : 0;
+  const earthAt = inertial ? rotatePoint([-mu, 0, 0], t) : [-mu, 0, 0];
+  const moonAt = inertial ? rotatePoint([1 - mu, 0, 0], t) : [1 - mu, 0, 0];
+  const ghostMoon = inertial && t !== 0 ? [1 - mu, 0, 0] : null;
+
+  // The Moon's circle is the thing every arc is read against; without it the
+  // inertial picture has no scale.
   const paths = useMemo(() => {
     if (!inertial) return null;
     const circle = (r) => {
@@ -221,17 +227,45 @@ function Bodies() {
 
   return (
     <group>
-      <mesh position={[-mu, 0, 0]}>
+      <mesh position={earthAt}>
         <sphereGeometry args={[earthRadius ?? 0.0164, 32, 24]} />
         <meshStandardMaterial color="#2b4a7a" roughness={0.9} metalness={0} />
       </mesh>
-      <Html position={[-mu, 0, (earthRadius ?? 0.0164) * 2.4]} center style={labelStyle} zIndexRange={LABEL_Z}>Earth</Html>
+      <Html
+        position={[earthAt[0], earthAt[1], earthAt[2] + (earthRadius ?? 0.0164) * 2.4]}
+        center style={labelStyle} zIndexRange={LABEL_Z}
+      >Earth</Html>
 
-      <mesh position={[1 - mu, 0, 0]}>
+      {/* In the inertial frame the Moon has moved by the time the vehicle
+          arrives. The ghost marks where it was at the departure burn and the
+          solid body where it is at arrival, which is the difference between a
+          transfer that meets the Moon and one that merely crosses its orbit. */}
+      {ghostMoon && (
+        <>
+          <mesh position={ghostMoon}>
+            <sphereGeometry args={[moonRadius, 20, 14]} />
+            <meshStandardMaterial
+              color="#8d8b84" roughness={1} metalness={0}
+              transparent opacity={0.28} depthWrite={false}
+            />
+          </mesh>
+          {/* At this scale the Moon is a few pixels across and a translucent
+              one is easy to miss, so the ghost says what it is. */}
+          <Html
+            position={[ghostMoon[0], ghostMoon[1], ghostMoon[2] + moonRadius * 9]}
+            center style={{ ...labelStyle, color: ink.muted }} zIndexRange={LABEL_Z}
+          >Moon at departure</Html>
+        </>
+      )}
+
+      <mesh position={moonAt}>
         <sphereGeometry args={[moonRadius, 24, 18]} />
         <meshStandardMaterial color="#8d8b84" roughness={1} metalness={0} />
       </mesh>
-      <Html position={[1 - mu, 0, moonRadius * 9]} center style={labelStyle} zIndexRange={LABEL_Z}>Moon</Html>
+      <Html
+        position={[moonAt[0], moonAt[1], moonAt[2] + moonRadius * 9]}
+        center style={labelStyle} zIndexRange={LABEL_Z}
+      >{ghostMoon ? 'Moon at arrival' : 'Moon'}</Html>
 
       {paths && (
         <>
@@ -459,31 +493,39 @@ function FamilySweep({ familyKey, count, opacity = 0.42, jacobiWindow = null }) 
  * the inertial frame, and propagation does not depend on it, so changing it
  * never costs a re-propagation.
  */
-function PeriodicOrbit({ orbit, color, opacity = 1, width = 2, epoch = 0, arrows = true }) {
+/**
+ * One periodic orbit.
+ *
+ * In the rotating frame it is a full period from the stored initial condition —
+ * the closed curve everyone expects. In the inertial frame, with a transfer
+ * selected, it is instead the window the transfer actually spans: the departure
+ * orbit forward from its burn for one TOF, the arrival orbit backward from its
+ * burn for the same. Three arcs over one shared window is a picture of what
+ * happens during the transfer; a full period each is a picture of three
+ * unrelated durations laid on top of one another.
+ */
+function PeriodicOrbit({ orbit, color, opacity = 1, width = 2, epoch = 0, window: win = null, arrows = true }) {
   const inertial = useStore((s) => s.inertial);
-
-  // A periodic orbit is periodic in the rotating frame only. One period covers
-  // just `period` radians of the frame's own turn, so in the inertial view a
-  // single revolution draws an arc rather than the loop around the Earth the
-  // orbit actually flies. Enough revolutions to cover one full turn of the
-  // frame close that picture; four is the cap, past which the rosette stops
-  // being readable.
-  const revs = inertial && orbit?.period
-    ? Math.min(4, Math.max(1, Math.ceil((2 * Math.PI) / orbit.period)))
-    : 1;
+  const active = inertial ? win : null;
 
   const [data] = useAsync(
     () => (orbit
       ? propagateOrbitAsync(
-        { ic: Array.from(orbit.ic), period: orbit.period }, 700, undefined, 0, revs
+        { ic: Array.from(orbit.ic), period: orbit.period },
+        700,
+        active
+          ? { phase: active.phase, duration: active.duration, t0: active.t0 }
+          : {}
       )
       : null),
-    [orbit?.id, orbit?.period, revs]
+    [orbit?.id, orbit?.period, active?.phase, active?.duration, active?.t0]
   );
   const positions = useMemo(() => {
     if (!data) return null;
-    return inertial ? toInertial(data.positions, data.times, epoch) : data.positions;
-  }, [data, inertial, epoch]);
+    // With a window the worker already stamped absolute times; without one the
+    // orbit runs on its own clock and `epoch` places it on the shared one.
+    return inertial ? toInertial(data.positions, data.times, active ? 0 : epoch) : data.positions;
+  }, [data, inertial, epoch, active]);
   const points = useMemo(() => (positions ? toPoints(positions) : null), [positions]);
   if (!points) return null;
   return (
@@ -615,26 +657,21 @@ export default function Scene() {
   const sliceIdx = useStore((s) => s.sliceIdx);
   const nImpulse = useStore((s) => s.nImpulse);
   const phaseRes = useStore((s) => s.phaseRes);
-  const compareWith = useStore((s) => s.compareWith);
   const rank = useStore((s) => s.rank);
-  const hideLunarInvalid = useStore((s) => s.hideLunarInvalid);
   const allFamilies = useStore((s) => s.allFamilies);
   const hasSolutions = useStore((s) => s.pairs.length > 0);
   const pairData = useStore((s) => s.pairData);
   const inertial = useStore((s) => s.inertial);
 
-  const { depOrbit, arrOrbit, row, compareRow } = useMemo(() => {
+  const { depOrbit, arrOrbit, row } = useMemo(() => {
     const s = useStore.getState();
     if (!s.pairData) return {};
     return {
       depOrbit: orbitFor(s, s.pairData.depIds[depIdx]),
       arrOrbit: orbitFor(s, s.pairData.arrIds[arrIdx]),
       row: solutionAt(s, nImpulse, depIdx, arrIdx, sliceIdx, rank),
-      compareRow: compareWith != null && compareWith !== nImpulse
-        ? solutionAt(s, compareWith, depIdx, arrIdx, sliceIdx, 1)
-        : null,
     };
-  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, phaseRes, compareWith, rank, hideLunarInvalid]);
+  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, phaseRes, rank]);
 
   // One clock for the whole scene, with the departure burn at t = 0. The
   // departure orbit therefore starts a phase-time *before* zero, and the
@@ -649,18 +686,59 @@ export default function Scene() {
     };
   }, [row, depOrbit, arrOrbit]);
 
+  /**
+   * The window each orbit is drawn over in the inertial view.
+   *
+   * Both orbits start at their own beginning — phase 0, the stored initial
+   * condition — never at the burn, so what is drawn is the orbit itself rather
+   * than a segment starting at an arbitrary point on it. The clock starts at
+   * the departure burn in either case; only the duration changes:
+   *
+   *   TOF longer than the longest period  -> both run for one TOF
+   *   otherwise                           -> each runs for its own period,
+   *                                          and the transfer for its TOF
+   */
+  const windows = useMemo(() => {
+    if (!row?.TOF) return { dep: null, arr: null };
+    const longest = Math.max(depOrbit?.period ?? 0, arrOrbit?.period ?? 0);
+    const long = row.TOF > longest;
+    return {
+      dep: { phase: null, duration: long ? row.TOF : (depOrbit?.period ?? row.TOF), t0: 0 },
+      arr: { phase: null, duration: long ? row.TOF : (arrOrbit?.period ?? row.TOF), t0: 0 },
+    };
+  }, [row, depOrbit, arrOrbit]);
+
   // With a transfer selected the interesting region is the Earth-Moon corridor;
   // with the whole catalog on screen it is the entire system, including the
   // L4/L5 families that reach out to |r| ~ 1.
-  // Inertial orbits are drawn about the barycentre rather than strung along the
-  // Earth-Moon line, so the frame that frames them is the whole system.
-  const target = useMemo(
-    () => (hasSolutions && !inertial
-      ? new THREE.Vector3(system ? 1 - system.mu - 0.08 : 0.9, 0, 0)
-      : new THREE.Vector3(0, 0, 0)),
-    [system, hasSolutions, inertial]
-  );
-  const zoom = hasSolutions ? (inertial ? 2.7 : 1) : 2.3;
+  // Framing. In the rotating frame the action is fixed in the Earth-Moon
+  // corridor. In the inertial frame it is not: the two arcs sit near the Moon's
+  // circle at whatever angle their epochs put them, so the camera is aimed at
+  // the middle of the span they actually occupy rather than at the barycentre,
+  // which would leave them off to one side.
+  const { target, zoom } = useMemo(() => {
+    const r = system ? 1 - system.mu : 1;
+    if (!hasSolutions) return { target: new THREE.Vector3(0, 0, 0), zoom: 2.3 };
+    if (!inertial) return { target: new THREE.Vector3(r - 0.08, 0, 0), zoom: 1 };
+
+    // In the inertial view the arcs are spread along the Moon's circle over the
+    // window being drawn, so both the aim point and the framing follow that
+    // window: the centroid of a circular arc of angle `span`, and enough
+    // distance to fit the chord it subtends.
+    const span = Math.min(
+      2 * Math.PI,
+      Math.max(row?.TOF ?? 0, depOrbit?.period ?? 0, arrOrbit?.period ?? 0) || 1
+    );
+    const half = span / 2;
+    const centroidR = half > 1e-6 ? r * (Math.sin(half) / half) : r;
+    const chord = 2 * r * Math.sin(Math.min(half, Math.PI / 2));
+    // The camera presets sit at |pos| ~ 1.55 and the field of view is 34 deg.
+    const height = Math.max(0.6, chord * 1.45);
+    return {
+      target: new THREE.Vector3(centroidR * Math.cos(half), centroidR * Math.sin(half), 0),
+      zoom: Math.min(3.2, height / 0.947),
+    };
+  }, [system, hasSolutions, inertial, row, depOrbit, arrOrbit]);
 
   // 13 families at full resolution is an unreadable thicket; thin them and let
   // the member slider bring detail back on demand.
@@ -698,9 +776,12 @@ export default function Scene() {
       <directionalLight position={[-3, -2, 4]} intensity={1.5} />
 
       {showGrid && <ReferenceGrid />}
-      <Bodies />
+      <Bodies tof={inertial ? row?.TOF ?? null : null} />
 
-      {showSweep && (hasSolutions
+      {/* The sweep is a rotating-frame device: unrolled into inertial space it
+          is a smear of unrelated epochs that hides the arcs it is meant to give
+          context to. */}
+      {showSweep && !inertial && (hasSolutions
         // With solutions loaded, only the two families in play are drawn, and
         // only across the Jacobi span the loaded surface covers.
         ? [depFamily, arrFamily]
@@ -721,21 +802,15 @@ export default function Scene() {
           <FamilySweep key={k} familyKey={k} count={catalogSweepCount} opacity={0.3} />
         )))}
 
-      <PeriodicOrbit orbit={depOrbit} color={series.departure} epoch={epochs.dep} />
-      <PeriodicOrbit orbit={arrOrbit} color={series.arrival} epoch={epochs.arr} />
+      <PeriodicOrbit
+        orbit={depOrbit} color={series.departure} epoch={epochs.dep} window={windows.dep}
+      />
+      <PeriodicOrbit
+        orbit={arrOrbit} color={series.arrival} epoch={epochs.arr} window={windows.arr}
+      />
 
-      {compareRow && (
-        <Transfer
-          dep={depOrbit} arr={arrOrbit} row={compareRow}
-          color={series.transferAlt} dashed showImpulses={false} channel="compare"
-        />
-      )}
       {row && (
-        <Transfer
-          dep={depOrbit} arr={arrOrbit} row={row}
-          color={row.lunar_valid === false ? status.critical : series.transfer}
-          channel="primary"
-        />
+        <Transfer dep={depOrbit} arr={arrOrbit} row={row} color={series.transfer} channel="primary" />
       )}
 
       <CameraRig target={target} zoom={zoom} />

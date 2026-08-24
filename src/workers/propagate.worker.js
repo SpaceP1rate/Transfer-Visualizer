@@ -9,7 +9,7 @@
 
 import { makeDerivs, integrate, moonDistance } from '../lib/cr3bp.js';
 import { Family, STRIDE } from '../lib/catalog.js';
-import { reconstructTransfer, samplePath } from '../lib/trajectory.js';
+import { reconstructTransfer, samplePath, phaseState } from '../lib/trajectory.js';
 import { readEdgeFile } from '../lib/mat-table.js';
 
 /** @type {Map<string, Family>} */
@@ -54,21 +54,44 @@ const handlers = {
   /**
    * Propagate one orbit for a full period.
    */
-  orbit({ orbit, samples = 600, t0 = 0, revs = 1 }) {
+  /**
+   * One orbit as a polyline.
+   *
+   * By default it is a full period from the stored initial condition. Given a
+   * `phase` it starts from that point on the orbit instead, and given a
+   * `duration` it runs for that long rather than a period — which is how the
+   * inertial view draws the piece of each orbit that the transfer's time of
+   * flight actually covers. A negative duration integrates backwards from the
+   * anchor (the arrival orbit is known at its *end*), and the result is
+   * reversed so time still increases along the polyline.
+   */
+  orbit({ orbit, samples = 600, t0 = 0, phase = null, duration = null }) {
     const o = orbitFrom(orbit);
+    const start = phase == null ? o.ic : Float64Array.from(phaseState(MU, o, phase));
+    const span = duration == null ? o.period : duration;
     // Vertex spacing follows the geometry, so a near-rectilinear orbit is
     // resolved through its perilune instead of being cut into a corner.
-    const span = o.period * Math.max(1, revs);
-    const r = samplePath(MU, o.ic, span, { minPoints: samples * Math.max(1, revs), t0 });
+    const r = samplePath(MU, start, span, { minPoints: samples, t0 });
+
+    let { positions, times } = r;
+    if (span < 0) {
+      const n = times.length;
+      const rp = new Float32Array(n * 3), rt = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const j = n - 1 - i;
+        rp[i * 3] = positions[j * 3];
+        rp[i * 3 + 1] = positions[j * 3 + 1];
+        rp[i * 3 + 2] = positions[j * 3 + 2];
+        rt[i] = times[j];
+      }
+      positions = rp; times = rt;
+    }
+
     return {
       payload: {
-        positions: r.positions,
-        times: r.times,
-        period: o.period,
-        jacobi: o.jacobi,
-        minMoon: r.minMoonDist,
+        positions, times, period: o.period, jacobi: o.jacobi, minMoon: r.minMoonDist,
       },
-      transfer: [r.positions.buffer, r.times.buffer],
+      transfer: [positions.buffer, times.buffer],
     };
   },
 

@@ -292,13 +292,21 @@ export async function readEdgeFile(buffer, opts = {}) {
     throw new Error('no MATLAB table found in this .mat');
   }
   const table = [...tables.values()][0];
-  const rows = tableToRows(table);
+  const all = tableToRows(table);
+
+  // Arcs that pass below the lunar surface are dropped here rather than at
+  // display time. Reducing first and filtering later is not the same thing: the
+  // per-slice reduction keeps only the cheapest few branches, so a cell whose
+  // cheapest branches all impact would keep nothing valid and read as "no
+  // solution". Filtering first makes every kept row the best *valid* one.
+  const rows = all.filter((r) => r.lunar_valid !== false);
   const reduced = reduceRows(rows, opts);
   return {
     rows: reduced,
     report: {
       names: table.names,
       totalRows: table.nrows,
+      lunarInvalid: all.length - rows.length,
       keptRows: reduced.length,
       truncated: mat.truncated === true,
       mu: mat.vars.get('mu')?.value?.[0] ?? null,
