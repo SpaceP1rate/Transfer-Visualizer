@@ -3,6 +3,7 @@ import { openCatalog } from './lib/catalog.js';
 import { parseTransfersCsv, parseOrbitsCsv } from './lib/csv.js';
 import { shareFamily, setMu, parseEdgeMatAsync, poolSize } from './lib/propagator-client.js';
 import { SolutionsSource } from './lib/source.js';
+import { variantKey } from './lib/layout.js';
 
 const BASE = import.meta.env.BASE_URL ?? './';
 export const url = (p) => `${BASE}${p}`.replace(/([^:])\/{2,}/g, '$1/');
@@ -24,8 +25,8 @@ const suffix = (id) => {
  * than assumed: the grid axes are the orbit labels that actually appear, and
  * the TOF slices are the ones the run actually recorded.
  */
-function derivePairData(rowsByN, orbitsCsv, studyDoc) {
-  const all = [...rowsByN.values()].flat();
+function derivePairData(rowsByVariant, orbitsCsv, studyDoc) {
+  const all = [...rowsByVariant.values()].flat();
   const depIds = [...new Set(all.map((r) => r.dep_orbit_id))].sort((a, b) => suffix(a) - suffix(b));
   const arrIds = [...new Set(all.map((r) => r.arr_orbit_id))].sort((a, b) => suffix(a) - suffix(b));
 
@@ -69,9 +70,9 @@ function derivePairData(rowsByN, orbitsCsv, studyDoc) {
   const missing = [...new Set([...depIds, ...arrIds])].filter((id) => !orbits.has(id));
   const icSource = orbitsCsv ? 'csv' : studyDoc ? 'catalog' : 'none';
 
-  // Row lookup: n -> "dep|arr|tofIdx" -> rows (ranked)
+  // Row lookup: variant ("n3_p25") -> "dep|arr|tofIdx" -> rows (ranked)
   const lookup = new Map();
-  for (const [n, rows] of rowsByN) {
+  for (const [n, rows] of rowsByVariant) {
     const m = new Map();
     for (const r of rows) {
       const slice = r.tof_idx ?? slices.find((s) => Math.abs(s.tof - r.TOF) < 1e-9)?.idx;
@@ -131,9 +132,11 @@ export const useStore = create((set, get) => ({
   pairKey: null,
   pairs: [],              // merged list of pairs the site can show
 
-  rowsByN: new Map(),
+  rowsByVariant: new Map(),   // "n3_p25" -> rows
+  variants: [],               // [{ n, p, key, rows }] in menu order
   pairData: null,
   nImpulse: null,
+  phaseRes: null,             // phase-grid resolution, null when the run had one
   compareWith: null,
 
   depIdx: 0,
@@ -143,6 +146,7 @@ export const useStore = create((set, get) => ({
   hideLunarInvalid: true,
 
   view: '3D',
+  inertial: false,
   showSweep: true,
   showGrid: true,
   showLagrange: true,
@@ -199,13 +203,25 @@ export const useStore = create((set, get) => ({
     const studyDoc = studyEntry ? await getJson(`data/study/${studyEntry.file}`) : null;
 
     let orbitsCsv = null;
-    const rowsByN = new Map();
+    const rowsByVariant = new Map();
+    const variantMeta = new Map();   // key -> { n, p }
+    const push = (n, p, rows) => {
+      if (!rows.length) return;
+      const k = variantKey(n, p);
+      variantMeta.set(k, { n, p: p ?? null });
+      const existing = rowsByVariant.get(k);
+      rowsByVariant.set(k, existing ? existing.concat(rows) : rows);
+    };
+    // Raw .mat pairings carry no folder, so they are grouped by the impulse
+    // count the rows themselves declare.
     const addRows = (rows) => {
+      const byN = new Map();
       for (const r of rows) {
         const n = r.n_impulse ?? 2;
-        if (!rowsByN.has(n)) rowsByN.set(n, []);
-        rowsByN.get(n).push(r);
+        if (!byN.has(n)) byN.set(n, []);
+        byN.get(n).push(r);
       }
+      for (const [n, rs] of byN) push(n, null, rs);
     };
 
     try {
@@ -213,18 +229,15 @@ export const useStore = create((set, get) => ({
         if (entry.orbitsFile) {
           orbitsCsv = parseOrbitsCsv(await source.readText(entry.orbitsFile));
         }
-        // Keyed by the folder's k, not by a count inferred from the rows: the
-        // n<k> directory is what the run declares, and it is what the impulse
-        // selector offers.
+        // Keyed by the folder's k and phase grid, not by anything inferred from
+        // the rows: the n<k>[_p<P>] directory is what the run declares, and it
+        // is what the selectors offer.
         for (const variant of entry.impulses ?? []) {
           let rows = [];
           for (const file of variant.files) {
             rows = rows.concat(parseTransfersCsv(await source.readText(file)));
           }
-          if (rows.length) {
-            const existing = rowsByN.get(variant.n);
-            rowsByN.set(variant.n, existing ? existing.concat(rows) : rows);
-          }
+          push(variant.n, variant.p ?? null, rows);
         }
 
         // Solver .mat files: one pairing each, ~22k solutions apiece. They are
@@ -268,18 +281,28 @@ export const useStore = create((set, get) => ({
     const arrFamily = studyDoc?.arrFamily ?? entry.arrFamily;
     await Promise.all([depFamily, arrFamily].filter(Boolean).map((k) => get().ensureFamily(k)));
 
-    const pairData = derivePairData(rowsByN, orbitsCsv, studyDoc);
-    const available = [...rowsByN.keys()].sort((a, b) => a - b);
-    const n = available.includes(get().nImpulse) ? get().nImpulse : (available[0] ?? null);
+    const pairData = derivePairData(rowsByVariant, orbitsCsv, studyDoc);
+    const variants = [...rowsByVariant.entries()]
+      .map(([key, rows]) => ({ key, ...variantMeta.get(key), rows }))
+      .sort((a, b) => a.n - b.n || (a.p ?? 0) - (b.p ?? 0));
+
+    // Keep the current selection when the new pair also has it; otherwise fall
+    // back to the first variant rather than leaving a dangling one selected.
+    const ns = [...new Set(variants.map((v) => v.n))].sort((a, b) => a - b);
+    const n = ns.includes(get().nImpulse) ? get().nImpulse : (ns[0] ?? null);
+    const ps = variants.filter((v) => v.n === n).map((v) => v.p ?? null);
+    const p = ps.includes(get().phaseRes) ? get().phaseRes : (ps[0] ?? null);
 
     set({
       study: studyDoc,
-      rowsByN,
+      rowsByVariant,
+      variants,
       pairData,
       depFamily,
       arrFamily,
       nImpulse: n,
-      compareWith: available.length > 1 ? available.find((k) => k !== n) ?? null : null,
+      phaseRes: p,
+      compareWith: ns.length > 1 ? ns.find((k) => k !== n) ?? null : null,
       depIdx: 0,
       arrIdx: 0,
       sliceIdx: Math.min(get().sliceIdx, Math.max(0, pairData.slices.length - 1)),
@@ -297,14 +320,35 @@ export const useStore = create((set, get) => ({
 
 const keep = (state, r) => !(state.hideLunarInvalid && r.lunar_valid === false);
 
+/**
+ * The lookup table for an impulse count at the currently selected phase grid.
+ *
+ * Callers ask by impulse count alone — the phase resolution is a separate,
+ * global choice. When the exact combination was not solved (comparing against a
+ * 2-impulse run that only exists at one resolution, say), the densest grid
+ * available for that impulse count stands in rather than the comparison
+ * silently disappearing.
+ */
+function variantLookup(state, n) {
+  const pd = state.pairData;
+  if (!pd || n == null) return null;
+  const exact = pd.lookup.get(variantKey(n, state.phaseRes));
+  if (exact) return exact;
+  const alt = (state.variants ?? [])
+    .filter((v) => v.n === n)
+    .sort((a, b) => (b.p ?? 0) - (a.p ?? 0))[0];
+  return alt ? pd.lookup.get(alt.key) ?? null : null;
+}
+
 /** Every solution recorded for one cell of the (departure, arrival, TOF) grid. */
 export function solutionsAt(state, n, depIdx, arrIdx, sliceIdx) {
   const pd = state.pairData;
-  if (!pd || !pd.lookup.has(n)) return [];
+  const table = variantLookup(state, n);
+  if (!table) return [];
   const depId = pd.depIds[depIdx], arrId = pd.arrIds[arrIdx];
   const slice = pd.slices[sliceIdx];
   if (!depId || !arrId || !slice) return [];
-  return (pd.lookup.get(n).get(`${depId}|${arrId}|${slice.idx}`) ?? []).filter((r) => keep(state, r));
+  return (table.get(`${depId}|${arrId}|${slice.idx}`) ?? []).filter((r) => keep(state, r));
 }
 
 /** The solution the 3D view draws: the requested rank, or the cheapest kept. */
@@ -322,7 +366,7 @@ export function dvGrid(state, n, sliceIdx) {
   const pd = state.pairData;
   const nd = pd?.depIds.length ?? 0, na = pd?.arrIds.length ?? 0;
   const out = new Float64Array(nd * na).fill(NaN);
-  if (!pd || !pd.lookup.has(n) || !pd.slices[sliceIdx]) return { values: out, nd, na };
+  if (!pd || !variantLookup(state, n) || !pd.slices[sliceIdx]) return { values: out, nd, na };
 
   for (let d = 0; d < nd; d++) {
     for (let a = 0; a < na; a++) {
@@ -340,7 +384,7 @@ export function dvGrid(state, n, sliceIdx) {
  * showing rather than smoothing away.
  */
 export function localMinimaViolations(state, n, sliceIdx, epsilon = 1e-9) {
-  if (n === 2 || !state.rowsByN.has(2) || !state.rowsByN.has(n)) return [];
+  if (n === 2 || !variantLookup(state, 2) || !variantLookup(state, n)) return [];
   const two = dvGrid(state, 2, sliceIdx);
   const multi = dvGrid(state, n, sliceIdx);
   const out = [];

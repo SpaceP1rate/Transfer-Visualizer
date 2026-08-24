@@ -21,8 +21,8 @@
  *   node scripts/reduce_solutions.mjs --only L1_Halo_to_L2_Halo
  *   node scripts/reduce_solutions.mjs --jobs 4
  *
- * Input   public/data/solutions/edges_<DEP>_to_<ARR>_n<k>/edge_*.mat
- * Output  public/data/solutions/<DEP>_to_<ARR>/n<k>/transfers_<DEP>_to_<ARR>_n<k>.csv
+ * Input   public/data/solutions/edges_<DEP>_to_<ARR>_n<k>[_p<P>]/edge_*.mat
+ * Output  public/data/solutions/<DEP>_to_<ARR>/n<k>[_p<P>]/transfers_<DEP>_to_<ARR>_n<k>[_p<P>].csv
  *
  * The raw edges_* folders are matched by .gitignore, so they stay on disk and
  * out of the repository. Run scripts/build_data_index.mjs afterwards.
@@ -39,16 +39,25 @@ const HERE = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(HERE), '..');
 const DIR = path.join(ROOT, 'public', 'data', 'solutions');
 
-// Columns written, in order. Matches what src/lib/csv.js reads.
-const COLUMNS = [
-  'dep_orbit_id', 'arr_orbit_id', 'n_impulse', 'TOF', 'DV_total',
-  'departure_phase', 'arrival_phase',
-  'dv1_x', 'dv1_y', 'dv1_z', 'dv2_x', 'dv2_y', 'dv2_z', 'dv3_x', 'dv3_y', 'dv3_z',
-  'dv1_mag', 'dv2_mag', 'dv3_mag',
-  't_leg1', 't_leg2',
-  'min_moon_dist', 'lunar_valid', 'chain_id', 'position_residual',
-  'tof_idx', 'delta_C', 'rank', 'seeds_converged',
-];
+// Columns written, in order. Built per file rather than fixed: the n-impulse
+// driver writes as many burns and legs as the run had, and a hardcoded
+// three-burn header would either truncate a 4-impulse solve or pad a 2-impulse
+// one with empty columns. src/lib/csv.js discovers the width the same way.
+function makeColumns(maxImpulse) {
+  const burns = Math.max(2, maxImpulse);
+  const cols = [
+    'dep_orbit_id', 'arr_orbit_id', 'n_impulse', 'TOF', 'DV_total',
+    'departure_phase', 'arrival_phase',
+  ];
+  for (let k = 1; k <= burns; k++) cols.push(`dv${k}_x`, `dv${k}_y`, `dv${k}_z`);
+  for (let k = 1; k <= burns; k++) cols.push(`dv${k}_mag`);
+  for (let k = 1; k <= burns - 1; k++) cols.push(`t_leg${k}`);
+  cols.push(
+    'min_moon_dist', 'lunar_valid', 'chain_id', 'position_residual',
+    'node_residual', 'tof_idx', 'delta_C', 'rank', 'seeds_converged',
+  );
+  return cols;
+}
 
 // ---------------------------------------------------------------------------
 // Worker: one process per core, each parsing whole files.
@@ -78,12 +87,19 @@ function arg(name, fallback) {
   return i >= 0 ? process.argv[i + 1] : fallback;
 }
 
-/** `edges_L1_Halo_to_L2_Halo_n2` -> { pair: 'L1_Halo_to_L2_Halo', n: 2 } */
+/**
+ * `edges_L1_Halo_to_L2_Halo_n2`      -> { pair: 'L1_Halo_to_L2_Halo', n: 2, p: null }
+ * `edges_L1_Halo_to_L2_Halo_n2_p25`  -> { pair: 'L1_Halo_to_L2_Halo', n: 2, p: 25 }
+ *
+ * `p` is the phase-grid resolution the multistart searched (25 x 25 seeds), so
+ * two folders that differ only in `p` are different solves of the same problem
+ * and both are kept.
+ */
 function parseFolder(name) {
   const stripped = name.replace(/^edges[_-]/i, '');
-  const m = /^(.+?)_n(\d+)$/i.exec(stripped);
-  if (m) return { pair: m[1], n: Number(m[2]) };
-  return { pair: stripped, n: null };
+  const m = /^(.+?)_n(\d+)(?:_p(\d+))?$/i.exec(stripped);
+  if (m) return { pair: m[1], n: Number(m[2]), p: m[3] ? Number(m[3]) : null };
+  return { pair: stripped, n: null, p: null };
 }
 
 const num = (v) => {
@@ -93,9 +109,7 @@ const num = (v) => {
   return Number.isInteger(v) ? String(v) : v.toPrecision(12);
 };
 
-function toCsvRow(r) {
-  const dv = (k, ax) => r.dvs[k]?.v?.[ax];
-  const mag = (k) => r.dvs[k]?.mag;
+function toCsvRow(r, columns) {
   const cell = {
     dep_orbit_id: r.dep_orbit_id,
     arr_orbit_id: r.arr_orbit_id,
@@ -104,21 +118,24 @@ function toCsvRow(r) {
     DV_total: r.DV_total,
     departure_phase: r.departure_phase,
     arrival_phase: r.arrival_phase,
-    dv1_x: dv(0, 0), dv1_y: dv(0, 1), dv1_z: dv(0, 2),
-    dv2_x: dv(1, 0), dv2_y: dv(1, 1), dv2_z: dv(1, 2),
-    dv3_x: dv(2, 0), dv3_y: dv(2, 1), dv3_z: dv(2, 2),
-    dv1_mag: mag(0), dv2_mag: mag(1), dv3_mag: mag(2),
-    t_leg1: r.coasts[0], t_leg2: r.coasts[1],
     min_moon_dist: r.min_moon_dist,
     lunar_valid: r.lunar_valid,
     chain_id: r.chain_id,
     position_residual: r.position_residual,
+    node_residual: r.node_residual,
     tof_idx: r.tof_idx,
     delta_C: r.delta_C,
     rank: r.rank,
     seeds_converged: r.seeds_converged,
   };
-  return COLUMNS.map((c) => num(cell[c])).join(',');
+  r.dvs.forEach((d, k) => {
+    cell[`dv${k + 1}_x`] = d.v[0];
+    cell[`dv${k + 1}_y`] = d.v[1];
+    cell[`dv${k + 1}_z`] = d.v[2];
+    cell[`dv${k + 1}_mag`] = d.mag;
+  });
+  r.coasts.forEach((t, k) => { cell[`t_leg${k + 1}`] = t; });
+  return columns.map((c) => num(cell[c])).join(',');
 }
 
 /** Run `files` through a pool of forked workers, calling onRow for each result. */
@@ -171,9 +188,9 @@ async function main() {
       .map((f) => path.join(DIR, e.name, f))
       .sort();
     if (!files.length) continue;
-    const { pair, n } = parseFolder(e.name);
+    const { pair, n, p } = parseFolder(e.name);
     if (only && pair !== only) continue;
-    targets.push({ folder: e.name, pair, n, files });
+    targets.push({ folder: e.name, pair, n, p, files });
   }
 
   if (!targets.length) {
@@ -207,9 +224,10 @@ async function main() {
     // The impulse count comes from the folder when it names one, and otherwise
     // from the burns actually present in the rows.
     const n = t.n ?? Math.max(...rows.map((r) => r.n_impulse ?? 2));
-    const outDir = path.join(DIR, t.pair, `n${n}`);
+    const tag = `n${n}${t.p ? `_p${t.p}` : ''}`;
+    const outDir = path.join(DIR, t.pair, tag);
     await mkdir(outDir, { recursive: true });
-    const outFile = path.join(outDir, `transfers_${t.pair}_n${n}.csv`);
+    const outFile = path.join(outDir, `transfers_${t.pair}_${tag}.csv`);
 
     rows.sort((a, b) =>
       a.dep_orbit_id.localeCompare(b.dep_orbit_id) ||
@@ -217,7 +235,8 @@ async function main() {
       (a.tof_idx ?? 0) - (b.tof_idx ?? 0) ||
       (a.rank ?? 1) - (b.rank ?? 1));
 
-    const csv = [COLUMNS.join(','), ...rows.map(toCsvRow)].join('\n');
+    const columns = makeColumns(Math.max(...rows.map((r) => r.dvs.length)));
+    const csv = [columns.join(','), ...rows.map((r) => toCsvRow(r, columns))].join('\n');
     await writeFile(outFile, csv);
 
     const invalid = rows.filter((r) => r.lunar_valid === false).length;

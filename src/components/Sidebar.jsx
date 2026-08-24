@@ -22,8 +22,9 @@ export default function Sidebar() {
   const pairKey = useStore((s) => s.pairKey);
   const loadPair = useStore((s) => s.loadPair);
   const pairData = useStore((s) => s.pairData);
-  const rowsByN = useStore((s) => s.rowsByN);
+  const variants = useStore((s) => s.variants);
   const nImpulse = useStore((s) => s.nImpulse);
+  const phaseRes = useStore((s) => s.phaseRes);
   const compareWith = useStore((s) => s.compareWith);
   const depIdx = useStore((s) => s.depIdx);
   const arrIdx = useStore((s) => s.arrIdx);
@@ -31,13 +32,20 @@ export default function Sidebar() {
   const sweepCount = useStore((s) => s.sweepCount);
   const system = useStore((s) => s.system);
   const view = useStore((s) => s.view);
+  const inertial = useStore((s) => s.inertial);
   const scan = useStore((s) => s.scan);
   const sourceError = useStore((s) => s.sourceError);
   const allFamilies = useStore((s) => s.allFamilies);
   const catalog = useStore((s) => s.catalog);
   const set = useStore((s) => s.set);
 
-  const available = [...rowsByN.keys()].sort((a, b) => a - b);
+  // Impulse counts, and the phase grids solved for the selected one. Both lists
+  // are what the folders hold — never a free-form number.
+  const available = [...new Set(variants.map((v) => v.n))].sort((a, b) => a - b);
+  const grids = variants.filter((v) => v.n === nImpulse);
+  const rowsFor = (n) => variants
+    .filter((v) => v.n === n && (v.p ?? null) === phaseRes)
+    .concat(variants.filter((v) => v.n === n))[0]?.rows.length ?? 0;
   const slices = pairData?.slices ?? [];
   const slice = slices[sliceIdx];
   const hasSolutions = pairs.length > 0;
@@ -72,14 +80,49 @@ export default function Sidebar() {
           <Field label="Impulses">
             <select
               value={nImpulse ?? ''}
-              onChange={(e) => set({ nImpulse: Number(e.target.value), rank: 1 })}
+              onChange={(e) => {
+                // Switching impulse count may land on a run solved at different
+                // phase grids; keep the current one when it exists there.
+                const n = Number(e.target.value);
+                const ps = variants.filter((v) => v.n === n).map((v) => v.p ?? null);
+                set({
+                  nImpulse: n,
+                  phaseRes: ps.includes(phaseRes) ? phaseRes : (ps[0] ?? null),
+                  // An overlay of the count you just switched to is not an
+                  // overlay; leaving it set would show "none" in the menu while
+                  // the legend claimed otherwise.
+                  compareWith: compareWith === n ? null : compareWith,
+                  rank: 1,
+                });
+              }}
               disabled={available.length < 2}
             >
               {available.map((n) => (
-                <option key={n} value={n}>{n}-impulse · {rowsByN.get(n).length} solutions</option>
+                <option key={n} value={n}>{n}-impulse · {rowsFor(n).toLocaleString()} solutions</option>
               ))}
             </select>
           </Field>
+
+          {/* Phase grid is its own axis: n2_p25 and n2_p50 are two solves of the
+              same problem at different multistart densities, so switching one
+              must not disturb the other. */}
+          {grids.length > 1 && (
+            <Field label="Phase grid">
+              <select
+                value={phaseRes ?? ''}
+                onChange={(e) => set({
+                  phaseRes: e.target.value === '' ? null : Number(e.target.value),
+                  rank: 1,
+                })}
+              >
+                {grids.map((v) => (
+                  <option key={v.key} value={v.p ?? ''}>
+                    {v.p ? `${v.p} x ${v.p} seeds` : 'default'} · {v.rows.length.toLocaleString()} solutions
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
 
           {available.length > 1 && (
             <Field label="Overlay">
@@ -169,10 +212,16 @@ export default function Sidebar() {
           ))}
         </div>
         <div className="checks">
+          <Check k="inertial" label="Inertial frame" />
           <Check k="showSweep" label="Family sweep" />
           <Check k="showGrid" label="Reference grid" />
-          <Check k="showLagrange" label="Libration points" />
+          {!inertial && <Check k="showLagrange" label="Libration points" />}
         </div>
+        {inertial && (
+          <div className="rampscale">
+            <span>Earth-centred · epoch at departure</span>
+          </div>
+        )}
         <div className="slider-row">
           <input
             type="range" min={10} max={220} step={10}
@@ -198,7 +247,7 @@ export default function Sidebar() {
               <span className="swatch"><i style={{ background: series.departure }} />Departure orbit</span>
               <span className="swatch"><i style={{ background: series.arrival }} />Arrival orbit</span>
               <span className="swatch"><i style={{ background: series.transfer }} />Transfer, {nImpulse ?? 'n'}-impulse</span>
-              {compareWith != null && (
+              {compareWith != null && compareWith !== nImpulse && (
                 <span className="swatch" style={{ color: series.transferAlt }}>
                   <i className="dashed" />
                   <span style={{ color: ink.secondary }}>Transfer, {compareWith}-impulse</span>

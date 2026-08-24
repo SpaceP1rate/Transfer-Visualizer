@@ -20,11 +20,27 @@ import { readMat, parseSubsystem } from './mat.js';
 const isCell = (x) => x && x.kind === 'cell';
 const isNum = (x) => x && x.kind === 'num';
 
-/** Length of a column, whether it is numeric or a cell of strings. */
-function columnLength(col) {
-  if (isNum(col)) return col.value.length;
-  if (isCell(col)) return col.cells.length;
+/**
+ * Rows in a table variable.
+ *
+ * A table variable is not always a column vector: the n-impulse export writes
+ * `DV_all` as nrows x 3n, `DV_mags` as nrows x n and `T_legs` as nrows x n-1.
+ * Counting elements instead of rows makes those look like columns of a
+ * different length, which used to reject the whole block — so the row count
+ * comes from the first dimension and the extra columns are unpacked later.
+ */
+function columnRows(col) {
+  if (isNum(col)) return col.dims?.[0] ?? col.value.length;
+  if (isCell(col)) return col.dims?.[0] ?? col.cells.length;
   return -1;
+}
+
+/** How many columns wide one table variable is (1 for a plain vector). */
+function columnWidth(col) {
+  const rows = columnRows(col);
+  if (rows <= 0) return 0;
+  const total = isNum(col) ? col.value.length : isCell(col) ? col.cells.length : 0;
+  return Math.max(1, Math.round(total / rows));
 }
 
 /**
@@ -38,15 +54,16 @@ export function extractTables(mat) {
 
   const cells = fw.cells;
 
-  // Candidate data blocks: a cell whose members are all the same length.
+  // Candidate data blocks: a cell whose members all have the same row count.
+  // Widths may differ — a table variable is allowed to be a matrix.
   const blocks = [];
   for (const c of cells) {
     if (!isCell(c) || c.cells.length === 0) continue;
-    const lens = c.cells.map(columnLength);
-    if (lens.some((l) => l < 0)) continue;
-    if (new Set(lens).size !== 1) continue;
-    if (lens[0] < 1) continue;
-    blocks.push({ cell: c, nvars: c.cells.length, nrows: lens[0] });
+    const rows = c.cells.map(columnRows);
+    if (rows.some((l) => l < 0)) continue;
+    if (new Set(rows).size !== 1) continue;
+    if (rows[0] < 1) continue;
+    blocks.push({ cell: c, nvars: c.cells.length, nrows: rows[0] });
   }
   // Candidate name blocks: a cell of char arrays.
   const nameBlocks = cells.filter(
@@ -67,11 +84,17 @@ export function extractTables(mat) {
   return out;
 }
 
-/** Column accessor that works for both numeric columns and cells of strings. */
-function accessor(col) {
+/**
+ * Column accessor that works for numeric columns, matrices and cells of
+ * strings. `k` selects the sub-column of a matrix variable; MATLAB stores
+ * column-major, so element (i, k) of an nrows x width variable is at
+ * `k * nrows + i` — reading it row-major silently interleaves the burns.
+ */
+function accessor(col, nrows) {
   if (isNum(col)) {
     const v = col.value;
-    return (i) => v[i];
+    const rows = nrows ?? columnRows(col);
+    return (i, k = 0) => v[k * rows + i];
   }
   if (isCell(col)) {
     const cs = col.cells;
@@ -106,8 +129,27 @@ const FIELD_MAP = {
 
 export function tableToRows(table) {
   const { names, columns, nrows } = table;
-  const get = columns.map(accessor);
+  const get = columns.map((c) => accessor(c, nrows));
+  const width = columns.map(columnWidth);
   const key = names.map((n) => n.trim().toLowerCase());
+
+  const at = (name) => {
+    const i = key.indexOf(name);
+    return i < 0 ? null : get[i];
+  };
+  const widthOf = (name) => {
+    const i = key.indexOf(name);
+    return i < 0 ? 0 : width[i];
+  };
+
+  // Two export shapes, same meaning. The 2-impulse driver flattened the burns
+  // into dv1_x … dv2_z; the n-impulse driver packs them as DV_all (3n wide),
+  // DV_mags (n) and T_legs (n-1). Prefer the packed form when it is present.
+  const dvAll = at('dv_all');
+  const dvMags = at('dv_mags');
+  const tLegs = at('t_legs');
+  const nBurns = dvAll ? Math.round(widthOf('dv_all') / 3) : 0;
+  const nLegsPacked = tLegs ? widthOf('t_legs') : 0;
 
   // Locate the burn-vector columns however many there are.
   const dvIndex = [];
@@ -122,11 +164,6 @@ export function tableToRows(table) {
     if (i < 0) break;
     legIndex.push(i);
   }
-
-  const at = (name) => {
-    const i = key.indexOf(name);
-    return i < 0 ? null : get[i];
-  };
   const TOFc = at('tof');
   const dvTotalC = at('dv_total');
   const depC = at('from') ?? at('dep_orbit_id');
@@ -142,20 +179,31 @@ export function tableToRows(table) {
   const dCC = at('delta_c');
   const typeC = at('transfer_type');
 
+  const nImpC = at('n_impulse');
+
   const rows = new Array(nrows);
   for (let i = 0; i < nrows; i++) {
-    const dvs = dvIndex.map((ix) => {
-      const v = [get[ix[0]](i), get[ix[1]](i), get[ix[2]](i)];
-      return { v, mag: Math.hypot(v[0], v[1], v[2]) };
-    });
+    const dvs = dvAll
+      ? Array.from({ length: nBurns }, (_, k) => {
+        const v = [dvAll(i, 3 * k), dvAll(i, 3 * k + 1), dvAll(i, 3 * k + 2)];
+        // The exported magnitude is what the solver costed; trust it over a
+        // recomputed norm so the total always matches DV_total exactly.
+        return { v, mag: dvMags ? dvMags(i, k) : Math.hypot(v[0], v[1], v[2]) };
+      })
+      : dvIndex.map((ix) => {
+        const v = [get[ix[0]](i), get[ix[1]](i), get[ix[2]](i)];
+        return { v, mag: Math.hypot(v[0], v[1], v[2]) };
+      });
     const TOF = TOFc ? TOFc(i) : null;
-    let coasts = legIndex.map((j) => get[j](i));
+    let coasts = tLegs
+      ? Array.from({ length: nLegsPacked }, (_, k) => tLegs(i, k))
+      : legIndex.map((j) => get[j](i));
     if (!coasts.length && TOF != null) coasts = [TOF];
 
     rows[i] = {
       dep_orbit_id: depC ? String(depC(i)) : '',
       arr_orbit_id: arrC ? String(arrC(i)) : '',
-      n_impulse: dvs.length,
+      n_impulse: nImpC ? nImpC(i) : dvs.length,
       transfer_type: typeC ? String(typeC(i)) : null,
       tof_idx: tofIdxC ? tofIdxC(i) : null,
       delta_C: dCC ? dCC(i) : null,

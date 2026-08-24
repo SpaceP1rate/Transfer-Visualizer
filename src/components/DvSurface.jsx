@@ -32,6 +32,7 @@ export default function DvSurface() {
 
   const pairData = useStore((s) => s.pairData);
   const nImpulse = useStore((s) => s.nImpulse);
+  const phaseRes = useStore((s) => s.phaseRes);
   const sliceIdx = useStore((s) => s.sliceIdx);
   const depIdx = useStore((s) => s.depIdx);
   const arrIdx = useStore((s) => s.arrIdx);
@@ -56,7 +57,7 @@ export default function DvSurface() {
       max: finite.length ? hi : NaN,
       minCell,
     };
-  }, [pairData, nImpulse, sliceIdx, hideLunarInvalid]);
+  }, [pairData, nImpulse, phaseRes, sliceIdx, hideLunarInvalid]);
 
   const nd = grid.nd, na = grid.na;
 
@@ -134,8 +135,11 @@ export default function DvSurface() {
           ctx.strokeRect(x + 1.5, y + 1.5, CELL - 3, CELL - 3);
         }
         if (d === depIdx && a === arrIdx) {
-          ctx.strokeStyle = ink.primary;
-          ctx.lineWidth = 1;
+          // Selection is red and dashed; the minimum is a solid white ring.
+          // Two different questions — "what am I looking at" and "what is the
+          // cheapest" — so they must not share a mark.
+          ctx.strokeStyle = status.critical;
+          ctx.lineWidth = 1.5;
           ctx.setLineDash([3, 2]);
           ctx.strokeRect(x - 0.5, y - 0.5, CELL + 1, CELL + 1);
           ctx.setLineDash([]);
@@ -165,6 +169,12 @@ export default function DvSurface() {
   };
 
   const vunit = system?.vunitKmS ?? 1;
+  const jacobiOf = (id) => pairData?.orbits?.get(id)?.jacobi ?? null;
+
+  const showCell = (e, c) => {
+    const v = grid.values[c.dep * na + c.arr];
+    setHover({ ...c, v, x: e.clientX, y: e.clientY });
+  };
 
   return (
     <div className="panel">
@@ -172,19 +182,22 @@ export default function DvSurface() {
       <div className="heatwrap" ref={wrapRef}>
         <canvas
           ref={canvasRef}
-          onMouseMove={(e) => {
+          // A tap both selects and shows the readout; hover-tracking is for
+          // pointers that can hover.
+          onPointerDown={(e) => {
+            const c = toCell(e);
+            if (!c) return;
+            setState({ depIdx: c.dep, arrIdx: c.arr, rank: 1 });
+            showCell(e, c);
+          }}
+          onPointerMove={(e) => {
+            if (e.pointerType !== 'mouse') return;
             const c = toCell(e);
             if (!c) return setHover(null);
-            const v = grid.values[c.dep * na + c.arr];
-            setHover({ ...c, v, x: e.clientX, y: e.clientY });
+            showCell(e, c);
           }}
-          onMouseLeave={() => setHover(null)}
           onPointerLeave={() => setHover(null)}
           onBlur={() => setHover(null)}
-          onClick={(e) => {
-            const c = toCell(e);
-            if (c) setState({ depIdx: c.dep, arrIdx: c.arr, rank: 1 });
-          }}
         />
         {hover && (
           <div className="tooltip" style={{ left: hover.x + 14, top: hover.y - 8 }}>
@@ -192,6 +205,21 @@ export default function DvSurface() {
             {Number.isFinite(hover.v)
               ? <>Δv {hover.v.toFixed(5)} nd · {(hover.v * vunit * 1000).toFixed(1)} m/s</>
               : <>no converged solution</>}
+            {/* The Jacobi constants are what pick the two orbits out of their
+                families, so they belong next to the cost of joining them. */}
+            {(() => {
+              const cd = jacobiOf(pairData.depIds[hover.dep]);
+              const ca = jacobiOf(pairData.arrIds[hover.arr]);
+              if (cd == null && ca == null) return null;
+              return (
+                <div style={{ color: ink.muted, marginTop: 3 }}>
+                  C {cd != null ? cd.toFixed(5) : '—'} → {ca != null ? ca.toFixed(5) : '—'}
+                  {cd != null && ca != null && (
+                    <> · ΔC {(ca - cd >= 0 ? '+' : '') + (ca - cd).toFixed(5)}</>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>

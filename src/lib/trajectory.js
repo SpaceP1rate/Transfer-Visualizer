@@ -78,39 +78,104 @@ function phaseTable(mu, orbit, N) {
 }
 
 /**
- * Propagate a state for duration T, sampling `nSamples` points.
- * @returns {{positions: Float32Array, states: Float64Array, final: Float64Array,
+ * Sampling controls for the adaptive path builder.
+ *
+ * A uniform grid in time is the wrong grid for this problem. An arc that passes
+ * close to the Moon covers most of its turn in a small fraction of the flight
+ * time, so a grid that looks generous over the whole leg puts only a handful of
+ * points through the part that actually bends — the polyline then cuts the
+ * corner, the drawn periapsis sits above the true one, and an arc that grazes
+ * the surface can be drawn clearing it. Sampling is therefore driven by chord
+ * length, with the allowance shrinking in proportion to the distance to the
+ * Moon: far away the limit is loose, near the Moon it tightens to a small
+ * fraction of the current altitude.
+ */
+const CHORD_FAR = 0.008;      // nd, ~3000 km — plenty in open space
+const CHORD_NEAR = 6e-5;      // nd, ~23 km — the floor, used at the surface
+const CHORD_FRACTION = 0.04;  // of the distance to the Moon's centre
+const MAX_SPLIT = 96;         // per integrator step, a backstop against blow-up
+
+const chordLimit = (dMoon) =>
+  Math.min(CHORD_FAR, Math.max(CHORD_NEAR, CHORD_FRACTION * dMoon));
+
+/**
+ * Propagate and return a polyline whose vertex spacing follows the geometry.
+ *
+ * Sample times come back alongside the positions: the inertial view needs the
+ * epoch of every vertex, and recomputing it from an index is only possible on a
+ * uniform grid, which this deliberately is not.
+ *
+ * @returns {{positions: Float32Array, times: Float32Array, final: Float64Array,
  *            minMoonDist: number, jacobi: number}}
  */
-export function propagateOrbit(mu, ic, T, nSamples = 600, opts = {}) {
+export function samplePath(mu, ic, T, opts = {}) {
   const f = makeDerivs(mu);
-  const n = Math.max(2, nSamples | 0);
-  const positions = new Float32Array(n * 3);
-  const states = opts.keepStates ? new Float64Array(n * 6) : null;
+  const t0 = opts.t0 ?? 0;
+  const minPoints = Math.max(2, opts.minPoints ?? 64);
+  const maxPoints = opts.maxPoints ?? 60000;
+
+  const xs = [], ts = [];
+  const y = new Float64Array(6);
   let minMoonDist = Infinity;
+  let last = Float64Array.from(ic);
+
+  const push = (t, s) => {
+    if (xs.length / 3 >= maxPoints) return;
+    xs.push(s[0], s[1], s[2]);
+    ts.push(t);
+    const d = moonDistance(mu, s);
+    if (d < minMoonDist) minMoonDist = d;
+  };
+
+  push(t0, last);
+
+  // A ceiling on the time between vertices as well, so a short, quiet arc still
+  // gets enough of them to read as a curve rather than a chord.
+  const dtMax = Math.abs(T) / minPoints;
 
   const final = integrate(f, ic, T, {
     rtol: opts.rtol ?? RTOL,
     atol: opts.atol ?? ATOL,
-    nSamples: n,
     stepper: stepper6,
-    onSample: (_t, y, i) => {
-      positions[i * 3] = y[0];
-      positions[i * 3 + 1] = y[1];
-      positions[i * 3 + 2] = y[2];
-      if (states) states.set(y, i * 6);
-      const d = moonDistance(mu, y);
-      if (d < minMoonDist) minMoonDist = d;
+    t0,
+    onSegment: (tStep, h, interp) => {
+      interp(1, y);
+      const chord = Math.hypot(y[0] - last[0], y[1] - last[1], y[2] - last[2]);
+      // The tighter of the two endpoints' allowances: entering a close pass is
+      // as important as leaving one.
+      const allow = Math.min(
+        chordLimit(moonDistance(mu, last)),
+        chordLimit(moonDistance(mu, y))
+      );
+      const m = Math.max(
+        1,
+        Math.min(MAX_SPLIT, Math.max(Math.ceil(chord / allow), Math.ceil(Math.abs(h) / dtMax)))
+      );
+      for (let j = 1; j <= m; j++) {
+        interp(j / m, y);
+        push(tStep + (h * j) / m, y);
+      }
+      last.set(y);
     },
   });
 
   return {
-    positions,
-    states,
+    positions: Float32Array.from(xs),
+    times: Float32Array.from(ts),
     final: Float64Array.from(final),
     minMoonDist,
     jacobi: jacobiConstant(mu, ic),
   };
+}
+
+/**
+ * Propagate a state for duration T.
+ *
+ * `nSamples` is now a lower bound on the vertex count rather than the count
+ * itself — see samplePath.
+ */
+export function propagateOrbit(mu, ic, T, nSamples = 600, opts = {}) {
+  return samplePath(mu, ic, T, { ...opts, minPoints: nSamples });
 }
 
 /** Convenience: one full revolution of a periodic orbit. */
@@ -149,6 +214,7 @@ export function reconstructTransfer(mu, { dep, arr, transfer, samplesPerLeg = 30
   let totalDv = 0;
 
   const nLegs = Math.max(0, t.coasts.length);
+  let elapsed = 0;
   for (let L = 0; L < nLegs; L++) {
     const dv = t.dvs[L]?.v ?? [0, 0, 0];
     impulses.push({
@@ -156,27 +222,28 @@ export function reconstructTransfer(mu, { dep, arr, transfer, samplesPerLeg = 30
       position: [X[0], X[1], X[2]],
       dv,
       mag: t.dvs[L]?.mag ?? Math.hypot(dv[0], dv[1], dv[2]),
-      time: legs.reduce((a, l) => a + l.duration, 0),
+      time: elapsed,
     });
     totalDv += impulses[L].mag;
 
     X[3] += dv[0]; X[4] += dv[1]; X[5] += dv[2];
 
     const dt = t.coasts[L];
-    const n = Math.max(2, samplesPerLeg | 0);
-    const positions = new Float32Array(n * 3);
-    const end = integrate(f, X, dt, {
-      rtol: RTOL, atol: ATOL, nSamples: n, stepper: stepper6,
-      onSample: (_tt, y, i) => {
-        positions[i * 3] = y[0];
-        positions[i * 3 + 1] = y[1];
-        positions[i * 3 + 2] = y[2];
-        const d = moonDistance(mu, y);
-        if (d < minMoonDist) minMoonDist = d;
-      },
+    // Times are absolute along the transfer, counted from the departure burn,
+    // so the inertial view can rotate every vertex by its own epoch.
+    const arc = samplePath(mu, X, dt, {
+      t0: elapsed, minPoints: samplesPerLeg, rtol: RTOL, atol: ATOL,
     });
-    legs.push({ index: L + 1, duration: dt, positions, startState: Float64Array.from(X) });
-    X = Float64Array.from(end);
+    if (arc.minMoonDist < minMoonDist) minMoonDist = arc.minMoonDist;
+    legs.push({
+      index: L + 1,
+      duration: dt,
+      positions: arc.positions,
+      times: arc.times,
+      startState: Float64Array.from(X),
+    });
+    elapsed += dt;
+    X = Float64Array.from(arc.final);
   }
 
   // Arrival burn: no geometry, but it is part of the cost.

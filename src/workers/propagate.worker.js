@@ -9,7 +9,7 @@
 
 import { makeDerivs, integrate, moonDistance } from '../lib/cr3bp.js';
 import { Family, STRIDE } from '../lib/catalog.js';
-import { reconstructTransfer } from '../lib/trajectory.js';
+import { reconstructTransfer, samplePath } from '../lib/trajectory.js';
 import { readEdgeFile } from '../lib/mat-table.js';
 
 /** @type {Map<string, Family>} */
@@ -54,22 +54,22 @@ const handlers = {
   /**
    * Propagate one orbit for a full period.
    */
-  orbit({ orbit, samples = 600 }) {
+  orbit({ orbit, samples = 600, t0 = 0, revs = 1 }) {
     const o = orbitFrom(orbit);
-    const f = makeDerivs(MU);
-    const n = Math.max(2, samples);
-    const positions = new Float32Array(n * 3);
-    let minMoon = Infinity;
-    integrate(f, o.ic, o.period, {
-      rtol: 1e-11, atol: 1e-11, nSamples: n,
-      onSample: (_t, y, i) => {
-        positions[i * 3] = y[0]; positions[i * 3 + 1] = y[1]; positions[i * 3 + 2] = y[2];
-        const d = moonDistance(MU, y);
-        if (d < minMoon) minMoon = d;
+    // Vertex spacing follows the geometry, so a near-rectilinear orbit is
+    // resolved through its perilune instead of being cut into a corner.
+    const span = o.period * Math.max(1, revs);
+    const r = samplePath(MU, o.ic, span, { minPoints: samples * Math.max(1, revs), t0 });
+    return {
+      payload: {
+        positions: r.positions,
+        times: r.times,
+        period: o.period,
+        jacobi: o.jacobi,
+        minMoon: r.minMoonDist,
       },
-    });
-    return { payload: { positions, period: o.period, jacobi: o.jacobi, minMoon },
-      transfer: [positions.buffer] };
+      transfer: [r.positions.buffer, r.times.buffer],
+    };
   },
 
   /**
@@ -87,6 +87,10 @@ const handlers = {
     // Segment list: (n-1) segments per orbit, 2 vertices each.
     const verts = new Float32Array(m * (n - 1) * 2 * 3);
     const tvals = new Float32Array(m);
+    // Periods, so the main thread can recover each vertex's epoch for the
+    // inertial view without a second buffer the size of the geometry: the
+    // sweep is sampled uniformly in time, so index and period are enough.
+    const periods = new Float32Array(m);
     const [cMin, cMax] = jacobiRange ?? fam.meta.jacobiRange;
     const span = cMax - cMin || 1;
 
@@ -105,10 +109,14 @@ const handlers = {
         verts[w++] = buf[(i + 1) * 3]; verts[w++] = buf[(i + 1) * 3 + 1]; verts[w++] = buf[(i + 1) * 3 + 2];
       }
       tvals[k] = (o.jacobi - cMin) / span;
+      periods[k] = o.period;
     }
     return {
-      payload: { positions: verts, t: tvals, segmentsPerOrbit: n - 1, count: m, jacobiRange: [cMin, cMax] },
-      transfer: [verts.buffer, tvals.buffer],
+      payload: {
+        positions: verts, t: tvals, periods,
+        segmentsPerOrbit: n - 1, count: m, jacobiRange: [cMin, cMax],
+      },
+      transfer: [verts.buffer, tvals.buffer, periods.buffer],
     };
   },
 
@@ -117,10 +125,12 @@ const handlers = {
     const result = reconstructTransfer(MU, {
       dep: orbitFrom(dep), arr: orbitFrom(arr), transfer, samplesPerLeg, N,
     });
-    const buffers = result.legs.map((l) => l.positions.buffer);
+    const buffers = result.legs.flatMap((l) => [l.positions.buffer, l.times.buffer]);
     return {
       payload: {
-        legs: result.legs.map((l) => ({ index: l.index, duration: l.duration, positions: l.positions })),
+        legs: result.legs.map((l) => ({
+          index: l.index, duration: l.duration, positions: l.positions, times: l.times,
+        })),
         impulses: result.impulses,
         minMoonDist: result.minMoonDist,
         closureError: result.closureError,

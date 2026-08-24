@@ -10,8 +10,10 @@
  *
  *   <pair>/orbits*.csv                     initial conditions for the run
  *   <pair>/n<k>/*.csv                      solutions for the k-impulse solver
- *   <pair>/transfers*_n<k>.csv             the same, as a flat file
- *   transfers_<DEP>_to_<ARR>_n<k>.csv      flat at the root; the pair comes
+ *   <pair>/n<k>_p<P>/*.csv                 the same, solved on a PxP phase grid
+ *   <pair>/transfers*_n<k>[_p<P>].csv      the same, as a flat file
+ *   transfers_<DEP>_to_<ARR>_n<k>[_p<P>].csv
+ *                                          flat at the root; the pair comes
  *                                          from the filename
  *   edges_<DEP>_to_<ARR>/edge_*.mat        the solver's own output, unreduced —
  *                                          read directly, no MATLAB export step
@@ -23,9 +25,9 @@ const CSV = /\.csv$/i;
 const MAT = /\.mat$/i;
 const EDGE_MAT = /^edge_.*\.mat$/i;
 const EDGES_DIR = /^edges[_-](.+)$/i;
-const FLAT = /^transfers_(.+?)_to_(.+?)_n(\d+)\.csv$/i;
-const NDIR = /^n(\d+)$/i;
-const NSUFFIX = /_n(\d+)\.csv$/i;
+const FLAT = /^transfers_(.+?)_to_(.+?)_n(\d+)(?:_p(\d+))?\.csv$/i;
+const NDIR = /^n(\d+)(?:_p(\d+))?$/i;
+const NSUFFIX = /_n(\d+)(?:_p(\d+))?\.csv$/i;
 const ORBITS = /^orbits.*\.csv$/i;
 
 /**
@@ -68,7 +70,10 @@ export function groupFiles(paths) {
     const flat = FLAT.exec(name);
     if (flat) {
       const key = seg.length > 1 ? seg[seg.length - 2] : `${flat[1]}_to_${flat[2]}`;
-      addFile(pair(NDIR.test(key) ? `${flat[1]}_to_${flat[2]}` : key), Number(flat[3]), p);
+      addFile(
+        pair(NDIR.test(key) ? `${flat[1]}_to_${flat[2]}` : key),
+        Number(flat[3]), num(flat[4]), p
+      );
       continue;
     }
 
@@ -82,13 +87,13 @@ export function groupFiles(paths) {
     const nDir = dir && NDIR.exec(dir);
     if (nDir) {
       const key = seg.length > 2 ? seg[seg.length - 3] : '_root';
-      addFile(pair(key), Number(nDir[1]), p);
+      addFile(pair(key), Number(nDir[1]), num(nDir[2]), p);
       continue;
     }
 
     const suffix = NSUFFIX.exec(name);
     if (suffix && dir) {
-      addFile(pair(dir), Number(suffix[1]), p);
+      addFile(pair(dir), Number(suffix[1]), num(suffix[2]), p);
       continue;
     }
 
@@ -106,18 +111,29 @@ export function groupFiles(paths) {
       arrFamily: arr,
       orbitsFile: p.orbitsFile,
       matFiles: p.matFiles.sort(),
-      impulses: [...p.byN.entries()]
-        .sort((a, b) => a[0] - b[0])
-        .map(([n, files]) => ({ n, files })),
+      impulses: [...p.byN.values()]
+        .sort((a, b) => a.n - b.n || (a.p ?? 0) - (b.p ?? 0))
+        .map(({ n, p: phase, files }) => ({ n, p: phase, files: files.sort() })),
     });
   }
   out.sort((a, b) => a.key.localeCompare(b.key));
   return { pairs: out, ignored, catalogs };
 }
 
-function addFile(p, n, path) {
-  if (!p.byN.has(n)) p.byN.set(n, []);
-  p.byN.get(n).push(path);
+const num = (v) => (v == null || v === '' ? null : Number(v));
+
+/**
+ * One variant is an impulse count *and* a phase-grid resolution: a run may
+ * carry `n2_p25` and `n2_p50` side by side, and they are different solutions of
+ * the same problem, not different views of one. They are keyed separately so
+ * both stay selectable.
+ */
+export const variantKey = (n, p) => `n${n}${p ? `_p${p}` : ''}`;
+
+function addFile(pair, n, phase, path) {
+  const k = variantKey(n, phase);
+  if (!pair.byN.has(k)) pair.byN.set(k, { n, p: phase, files: [] });
+  pair.byN.get(k).files.push(path);
 }
 
 export function splitPair(key) {

@@ -80,8 +80,8 @@ export async function shareFamily(family) {
 
 export const setMu = (mu) => getPool().broadcast('setMu', { mu });
 
-export const propagateOrbitAsync = (orbit, samples, channel) =>
-  getPool().call('orbit', { orbit, samples }, { channel });
+export const propagateOrbitAsync = (orbit, samples, channel, t0 = 0, revs = 1) =>
+  getPool().call('orbit', { orbit, samples, t0, revs }, { channel });
 
 export const familySweepAsync = (key, indices, samples, jacobiRange, channel) =>
   getPool().callSticky(key, 'familySweep', { key, indices, samples, jacobiRange }, { channel });

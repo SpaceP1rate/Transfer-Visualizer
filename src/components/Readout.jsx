@@ -21,6 +21,7 @@ export function ReadoutSummary() {
   const arrIdx = useStore((s) => s.arrIdx);
   const sliceIdx = useStore((s) => s.sliceIdx);
   const nImpulse = useStore((s) => s.nImpulse);
+  const phaseRes = useStore((s) => s.phaseRes);
   const rank = useStore((s) => s.rank);
   const hideLunarInvalid = useStore((s) => s.hideLunarInvalid);
 
@@ -33,7 +34,7 @@ export function ReadoutSummary() {
       arr: pd.arrIds[arrIdx],
       row: solutionAt(st, nImpulse, depIdx, arrIdx, sliceIdx, rank),
     };
-  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, rank, hideLunarInvalid]);
+  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, phaseRes, rank, hideLunarInvalid]);
 
   if (!d || !system) return <span className="k">Controls</span>;
   return (
@@ -62,6 +63,7 @@ export default function Readout({ inline = false }) {
   const arrIdx = useStore((s) => s.arrIdx);
   const sliceIdx = useStore((s) => s.sliceIdx);
   const nImpulse = useStore((s) => s.nImpulse);
+  const phaseRes = useStore((s) => s.phaseRes);
   const compareWith = useStore((s) => s.compareWith);
   const rank = useStore((s) => s.rank);
   const hideLunarInvalid = useStore((s) => s.hideLunarInvalid);
@@ -80,7 +82,7 @@ export default function Readout({ inline = false }) {
         ? solutionAt(s, compareWith, depIdx, arrIdx, sliceIdx, 1) : null,
       slice: pd.slices[sliceIdx],
     };
-  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, compareWith, rank, hideLunarInvalid]);
+  }, [pairData, depIdx, arrIdx, sliceIdx, nImpulse, phaseRes, compareWith, rank, hideLunarInvalid]);
 
   if (!system || !d) return null;
   const { vunitKmS, tunitS, lunitKm, moonRadius } = system;

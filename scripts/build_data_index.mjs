@@ -64,6 +64,7 @@ for (const p of pairs) {
     const valid = rows.filter((r) => r.lunar_valid !== false);
     impulses.push({
       n: variant.n,
+      p: variant.p ?? null,
       files: variant.files,
       rows: rows.length,
       lunarInvalid: rows.length - valid.length,
@@ -72,7 +73,7 @@ for (const p of pairs) {
       maxResidual: rows.reduce((m, r) => Math.max(m, r.position_residual ?? 0), 0),
     });
     console.log(
-      `  ${p.key}  n=${variant.n}: ${rows.length} rows` +
+      `  ${p.key}  n=${variant.n}${variant.p ? ` p=${variant.p}` : ''}: ${rows.length} rows` +
       `, ${rows.length - valid.length} lunar-invalid` +
       `, max residual ${impulses[impulses.length - 1].maxResidual.toExponential(1)}`
     );

@@ -277,6 +277,15 @@ export function integrate(f, y0, T, opts = {}) {
       st._prepareDense(h);
       const tNew = t + h;
 
+      // Per-step hook: hand the caller the accepted step and a way to evaluate
+      // anywhere inside it. The step controller already shortens steps where
+      // the dynamics are stiff — close to the Moon, above all — so sampling off
+      // the steps themselves puts points where the trajectory actually needs
+      // them, which a uniform grid in time cannot do at any affordable count.
+      if (opts.onSegment) {
+        opts.onSegment(t, h, (theta, dst) => st.interpolate(Math.min(Math.max(theta, 0), 1), dst));
+      }
+
       // Emit every sample time that fell inside this step.
       if (onSample && nSamples > 1) {
         while (nextSample < nSamples) {
