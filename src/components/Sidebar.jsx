@@ -201,6 +201,13 @@ export default function Sidebar() {
               onClick={() => set({ view: v })}
             >{v}</button>
           ))}
+          {/* Panning and zooming leave the camera wherever the last gesture put
+              it; this returns it to the framing the current view defines. */}
+          <button
+            className="btn"
+            title="Recenter the camera on the current selection"
+            onClick={() => set({ recenter: useStore.getState().recenter + 1 })}
+          >Recenter</button>
         </div>
         <div className="checks">
           <Check k="inertial" label="Inertial frame" />

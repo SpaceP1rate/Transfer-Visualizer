@@ -117,6 +117,10 @@ export function samplePath(mu, ic, T, opts = {}) {
   const xs = [], ts = [];
   const y = new Float64Array(6);
   let minMoonDist = Infinity;
+  // When the closest approach happens, not just how close it is: the inertial
+  // view marks the Moon's position at that instant, which is only meaningful
+  // with the epoch attached.
+  let minMoonTime = null;
   let last = Float64Array.from(ic);
 
   const push = (t, s) => {
@@ -124,7 +128,7 @@ export function samplePath(mu, ic, T, opts = {}) {
     xs.push(s[0], s[1], s[2]);
     ts.push(t);
     const d = moonDistance(mu, s);
-    if (d < minMoonDist) minMoonDist = d;
+    if (d < minMoonDist) { minMoonDist = d; minMoonTime = t; }
   };
 
   push(t0, last);
@@ -164,6 +168,7 @@ export function samplePath(mu, ic, T, opts = {}) {
     times: Float32Array.from(ts),
     final: Float64Array.from(final),
     minMoonDist,
+    minMoonTime,
     jacobi: jacobiConstant(mu, ic),
   };
 }
@@ -211,6 +216,7 @@ export function reconstructTransfer(mu, { dep, arr, transfer, samplesPerLeg = 30
   const legs = [];
   const impulses = [];
   let minMoonDist = moonDistance(mu, X);
+  let minMoonTime = 0;
   let totalDv = 0;
 
   const nLegs = Math.max(0, t.coasts.length);
@@ -234,7 +240,10 @@ export function reconstructTransfer(mu, { dep, arr, transfer, samplesPerLeg = 30
     const arc = samplePath(mu, X, dt, {
       t0: elapsed, minPoints: samplesPerLeg, rtol: RTOL, atol: ATOL,
     });
-    if (arc.minMoonDist < minMoonDist) minMoonDist = arc.minMoonDist;
+    if (arc.minMoonDist < minMoonDist) {
+      minMoonDist = arc.minMoonDist;
+      minMoonTime = arc.minMoonTime ?? elapsed;
+    }
     legs.push({
       index: L + 1,
       duration: dt,
@@ -268,7 +277,7 @@ export function reconstructTransfer(mu, { dep, arr, transfer, samplesPerLeg = 30
     closureError = Math.hypot(X[0] - target[0], X[1] - target[1], X[2] - target[2]);
   }
 
-  return { legs, impulses, endState: X, minMoonDist, closureError, totalDv };
+  return { legs, impulses, endState: X, minMoonDist, minMoonTime, closureError, totalDv };
 }
 
 /**

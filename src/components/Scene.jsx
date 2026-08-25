@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, useState, Suspense } from 'react';
+import { useMemo, useRef, useEffect, useState, Suspense, Component } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Line, Html, GizmoHelper, GizmoViewport, useTexture } from '@react-three/drei';
 import * as THREE from 'three';
@@ -224,6 +224,33 @@ function Body({ position, radius, map, spin = 0, opacity = 1 }) {
   );
 }
 
+/**
+ * A texture that cannot be fetched must not be able to take down the scene.
+ *
+ * `useTexture` suspends and then throws if the file is missing, and an
+ * uncaught throw inside the canvas unmounts the whole React tree — a blank
+ * page, not a missing texture. This catches it and falls back to a plain
+ * sphere, so a bad deploy costs the surface map and nothing else.
+ */
+class TextureBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(err) {
+    console.warn('body texture unavailable, drawing a plain sphere:', err?.message ?? err);
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
 /** Plain sphere, used while a texture is still loading. */
 const PlainBody = ({ position, radius, color, opacity = 1 }) => (
   <mesh position={position}>
@@ -234,6 +261,18 @@ const PlainBody = ({ position, radius, color, opacity = 1 }) => (
     />
   </mesh>
 );
+
+/** Textured body with both a loading and a failure fallback. */
+function BodySphere({ position, radius, map, color, spin = 0, opacity = 1 }) {
+  const plain = <PlainBody position={position} radius={radius} color={color} opacity={opacity} />;
+  return (
+    <TextureBoundary fallback={plain}>
+      <Suspense fallback={plain}>
+        <Body position={position} radius={radius} map={map} spin={spin} opacity={opacity} />
+      </Suspense>
+    </TextureBoundary>
+  );
+}
 
 const EARTH_MAP = url('textures/earth.webp');
 const MOON_MAP = url('textures/moon.webp');
@@ -282,11 +321,9 @@ function Bodies({ tof = null, tClose = null }) {
 
   return (
     <group>
-      <Suspense
-        fallback={<PlainBody position={earthAt} radius={earthRadius ?? 0.0164} color="#2b4a7a" />}
-      >
-        <Body position={earthAt} radius={earthRadius ?? 0.0164} map={EARTH_MAP} />
-      </Suspense>
+      <BodySphere
+        position={earthAt} radius={earthRadius ?? 0.0164} map={EARTH_MAP} color="#2b4a7a"
+      />
       <Html
         position={[earthAt[0], earthAt[1], earthAt[2] + (earthRadius ?? 0.0164) * 2.4]}
         center style={labelStyle} zIndexRange={LABEL_Z}
@@ -298,9 +335,10 @@ function Bodies({ tof = null, tClose = null }) {
           transfer that meets the Moon and one that merely crosses its orbit. */}
       {ghostMoon && (
         <>
-          <Suspense fallback={<PlainBody position={ghostMoon} radius={moonRadius} color="#8d8b84" opacity={0.3} />}>
-            <Body position={ghostMoon} radius={moonRadius} map={MOON_MAP} spin={MOON_SPIN} opacity={0.3} />
-          </Suspense>
+          <BodySphere
+            position={ghostMoon} radius={moonRadius} map={MOON_MAP} color="#8d8b84"
+            spin={MOON_SPIN} opacity={0.3}
+          />
           {/* At this scale the Moon is a few pixels across and a translucent
               one is easy to miss, so the ghost says what it is. */}
           <Html
@@ -314,9 +352,10 @@ function Bodies({ tof = null, tClose = null }) {
           Moon, which in the inertial frame is neither of the two endpoints. */}
       {closeMoon && (
         <>
-          <Suspense fallback={<PlainBody position={closeMoon} radius={moonRadius} color="#8d8b84" opacity={0.55} />}>
-            <Body position={closeMoon} radius={moonRadius} map={MOON_MAP} spin={MOON_SPIN} opacity={0.55} />
-          </Suspense>
+          <BodySphere
+            position={closeMoon} radius={moonRadius} map={MOON_MAP} color="#8d8b84"
+            spin={MOON_SPIN} opacity={0.55}
+          />
           <Html
             position={[closeMoon[0], closeMoon[1], closeMoon[2] + moonRadius * 9]}
             center style={{ ...labelStyle, color: ink.secondary }} zIndexRange={LABEL_Z}
@@ -324,9 +363,7 @@ function Bodies({ tof = null, tClose = null }) {
         </>
       )}
 
-      <Suspense fallback={<PlainBody position={moonAt} radius={moonRadius} color="#8d8b84" />}>
-        <Body position={moonAt} radius={moonRadius} map={MOON_MAP} spin={MOON_SPIN} />
-      </Suspense>
+      <BodySphere position={moonAt} radius={moonRadius} map={MOON_MAP} color="#8d8b84" spin={MOON_SPIN} />
       <Html
         position={[moonAt[0], moonAt[1], moonAt[2] + moonRadius * 9]}
         center style={labelStyle} zIndexRange={LABEL_Z}

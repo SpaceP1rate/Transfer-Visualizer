@@ -166,6 +166,9 @@ export const useStore = create((set, get) => ({
   rank: 1,
 
   view: '3D',
+  // Bumped to re-run the camera framing. Panning and zooming move the camera
+  // away from the preset; this is the way back without reloading.
+  recenter: 0,
   inertial: false,
   showSweep: true,
   showGrid: true,

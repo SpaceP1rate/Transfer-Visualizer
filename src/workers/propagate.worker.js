@@ -156,6 +156,7 @@ const handlers = {
         })),
         impulses: result.impulses,
         minMoonDist: result.minMoonDist,
+        minMoonTime: result.minMoonTime,
         closureError: result.closureError,
         totalDv: result.totalDv,
       },
