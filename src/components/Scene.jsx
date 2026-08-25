@@ -1,6 +1,6 @@
-import { useMemo, useRef, useEffect } from 'react';
+import { useMemo, useRef, useEffect, useState, Suspense } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Line, Html, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import { OrbitControls, Line, Html, GizmoHelper, GizmoViewport, useTexture } from '@react-three/drei';
 import * as THREE from 'three';
 
 import { useStore, solutionAt, orbitFor } from '../store.js';
@@ -8,6 +8,7 @@ import { useAsync, toPoints } from '../hooks.js';
 import { PHASE_RESOLUTION } from '../lib/trajectory.js';
 import { propagateOrbitAsync, familySweepAsync, transferAsync } from '../lib/propagator-client.js';
 import { ink, series, status, ramp } from '../theme.js';
+import { url } from '../store.js';
 
 /**
  * The rotating (synodic) frame, drawn in nondimensional units: the barycentre
@@ -194,7 +195,58 @@ function DirectionArrows({ positions, color, count = 6 }) {
   );
 }
 
-function Bodies({ tof = null }) {
+/**
+ * A body sphere with its surface map.
+ *
+ * Two details are physical rather than cosmetic. The pole axis is z here, not
+ * three's default y, so every sphere is tipped a quarter turn. And the Moon is
+ * tidally locked: its near side faces the Earth, which in the rotating frame is
+ * a fixed direction, so the map is oriented once and never spun.
+ */
+function Body({ position, radius, map, spin = 0, opacity = 1 }) {
+  const texture = useTexture(map);
+  useEffect(() => {
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+  }, [texture]);
+  return (
+    <mesh position={position} rotation={[Math.PI / 2, 0, spin]}>
+      <sphereGeometry args={[radius, 48, 32]} />
+      <meshStandardMaterial
+        map={texture}
+        roughness={1}
+        metalness={0}
+        transparent={opacity < 1}
+        opacity={opacity}
+        depthWrite={opacity >= 1}
+      />
+    </mesh>
+  );
+}
+
+/** Plain sphere, used while a texture is still loading. */
+const PlainBody = ({ position, radius, color, opacity = 1 }) => (
+  <mesh position={position}>
+    <sphereGeometry args={[radius, 24, 18]} />
+    <meshStandardMaterial
+      color={color} roughness={1} metalness={0}
+      transparent={opacity < 1} opacity={opacity} depthWrite={opacity >= 1}
+    />
+  </mesh>
+);
+
+const EARTH_MAP = url('textures/earth.webp');
+const MOON_MAP = url('textures/moon.webp');
+
+/**
+ * The Moon keeps one face towards the Earth. An equirectangular map has
+ * longitude 0 at its centre, which after the pole tip lands on +x; the Earth
+ * lies in -x from the Moon, so the map is turned half a revolution to point the
+ * near side the right way.
+ */
+const MOON_SPIN = Math.PI;
+
+function Bodies({ tof = null, tClose = null }) {
   const system = useStore((s) => s.system);
   const showLagrange = useStore((s) => s.showLagrange);
   const inertial = useStore((s) => s.inertial);
@@ -209,6 +261,9 @@ function Bodies({ tof = null }) {
   const earthAt = inertial ? rotatePoint([-mu, 0, 0], t) : [-mu, 0, 0];
   const moonAt = inertial ? rotatePoint([1 - mu, 0, 0], t) : [1 - mu, 0, 0];
   const ghostMoon = inertial && t !== 0 ? [1 - mu, 0, 0] : null;
+  const closeMoon = inertial && Number.isFinite(tClose) && tClose > 1e-6 && Math.abs(tClose - t) > 1e-6
+    ? rotatePoint([1 - mu, 0, 0], tClose)
+    : null;
 
   // The Moon's circle is the thing every arc is read against; without it the
   // inertial picture has no scale.
@@ -227,10 +282,11 @@ function Bodies({ tof = null }) {
 
   return (
     <group>
-      <mesh position={earthAt}>
-        <sphereGeometry args={[earthRadius ?? 0.0164, 32, 24]} />
-        <meshStandardMaterial color="#2b4a7a" roughness={0.9} metalness={0} />
-      </mesh>
+      <Suspense
+        fallback={<PlainBody position={earthAt} radius={earthRadius ?? 0.0164} color="#2b4a7a" />}
+      >
+        <Body position={earthAt} radius={earthRadius ?? 0.0164} map={EARTH_MAP} />
+      </Suspense>
       <Html
         position={[earthAt[0], earthAt[1], earthAt[2] + (earthRadius ?? 0.0164) * 2.4]}
         center style={labelStyle} zIndexRange={LABEL_Z}
@@ -242,13 +298,9 @@ function Bodies({ tof = null }) {
           transfer that meets the Moon and one that merely crosses its orbit. */}
       {ghostMoon && (
         <>
-          <mesh position={ghostMoon}>
-            <sphereGeometry args={[moonRadius, 20, 14]} />
-            <meshStandardMaterial
-              color="#8d8b84" roughness={1} metalness={0}
-              transparent opacity={0.28} depthWrite={false}
-            />
-          </mesh>
+          <Suspense fallback={<PlainBody position={ghostMoon} radius={moonRadius} color="#8d8b84" opacity={0.3} />}>
+            <Body position={ghostMoon} radius={moonRadius} map={MOON_MAP} spin={MOON_SPIN} opacity={0.3} />
+          </Suspense>
           {/* At this scale the Moon is a few pixels across and a translucent
               one is easy to miss, so the ghost says what it is. */}
           <Html
@@ -258,10 +310,23 @@ function Bodies({ tof = null }) {
         </>
       )}
 
-      <mesh position={moonAt}>
-        <sphereGeometry args={[moonRadius, 24, 18]} />
-        <meshStandardMaterial color="#8d8b84" roughness={1} metalness={0} />
-      </mesh>
+      {/* Closest approach: the instant the arc is actually flying past the
+          Moon, which in the inertial frame is neither of the two endpoints. */}
+      {closeMoon && (
+        <>
+          <Suspense fallback={<PlainBody position={closeMoon} radius={moonRadius} color="#8d8b84" opacity={0.55} />}>
+            <Body position={closeMoon} radius={moonRadius} map={MOON_MAP} spin={MOON_SPIN} opacity={0.55} />
+          </Suspense>
+          <Html
+            position={[closeMoon[0], closeMoon[1], closeMoon[2] + moonRadius * 9]}
+            center style={{ ...labelStyle, color: ink.secondary }} zIndexRange={LABEL_Z}
+          >Moon at closest approach</Html>
+        </>
+      )}
+
+      <Suspense fallback={<PlainBody position={moonAt} radius={moonRadius} color="#8d8b84" />}>
+        <Body position={moonAt} radius={moonRadius} map={MOON_MAP} spin={MOON_SPIN} />
+      </Suspense>
       <Html
         position={[moonAt[0], moonAt[1], moonAt[2] + moonRadius * 9]}
         center style={labelStyle} zIndexRange={LABEL_Z}
@@ -537,7 +602,7 @@ function PeriodicOrbit({ orbit, color, opacity = 1, width = 2, epoch = 0, window
 }
 
 /** One reconstructed transfer: coast arcs plus a marker at every impulse. */
-function Transfer({ dep, arr, row, color, dashed = false, showImpulses = true, channel }) {
+function Transfer({ dep, arr, row, color, dashed = false, showImpulses = true, channel, onReport }) {
   const [data] = useAsync(() => {
     if (!dep || !arr || !row) return null;
     return transferAsync(
@@ -548,6 +613,9 @@ function Transfer({ dep, arr, row, color, dashed = false, showImpulses = true, c
   }, [dep?.id, arr?.id, row, channel]);
 
   const inertial = useStore((s) => s.inertial);
+  useEffect(() => {
+    onReport?.(data ? { minMoonTime: data.minMoonTime, minMoonDist: data.minMoonDist } : null);
+  }, [data, onReport]);
   const legs = useMemo(() => {
     if (!data) return [];
     return data.legs.map((l) => toPoints(inertial ? toInertial(l.positions, l.times) : l.positions));
@@ -601,6 +669,7 @@ function CameraRig({ target, zoom = 1 }) {
   const { camera } = useThree();
   const controls = useRef();
   const view = useStore((s) => s.view);
+  const recenter = useStore((s) => s.recenter);
 
   // Map convention on touch: one finger slides the scene, two fingers turn it,
   // and the pinch inside that two-finger gesture still zooms. Assigned on the
@@ -617,18 +686,40 @@ function CameraRig({ target, zoom = 1 }) {
 
   useEffect(() => {
     const v = VIEWS[view] ?? VIEWS['3D'];
+
     // Presets are offsets from the framing target, so switching view keeps
     // whatever the user is looking at centred. `zoom` widens the framing when
     // the scene is the whole catalog rather than a single transfer.
-    camera.up.set(...v.up);
-    camera.position.set(
-      target.x + v.pos[0] * zoom,
-      target.y + v.pos[1] * zoom,
-      target.z + v.pos[2] * zoom
-    );
-    camera.lookAt(target);
-    controls.current?.update();
-  }, [view, camera, target, zoom]);
+    const place = () => {
+      camera.up.set(...v.up);
+      camera.position.set(
+        target.x + v.pos[0] * zoom,
+        target.y + v.pos[1] * zoom,
+        target.z + v.pos[2] * zoom
+      );
+      camera.lookAt(target);
+      // The controls keep their own target, which panning moves; put it back
+      // too, or the camera snaps home and then orbits about a stale point.
+      // Damping is switched off for the update on purpose: with it on, the
+      // controls only decay the leftover rotate and pan deltas from the last
+      // gesture, and go on applying them afterwards.
+      const c = controls.current;
+      if (c) {
+        c.target.copy(target);
+        const damping = c.enableDamping;
+        c.enableDamping = false;
+        c.update();
+        c.enableDamping = damping;
+      }
+    };
+
+    place();
+    // Once more next frame. The controls run their own update between these
+    // two, and whatever residual it applies to the first placement is gone by
+    // the second — measured, the first lands ~2% off and the second is exact.
+    const id = requestAnimationFrame(place);
+    return () => cancelAnimationFrame(id);
+  }, [view, camera, target, zoom, recenter]);
 
   return (
     <OrbitControls
@@ -663,6 +754,10 @@ export default function Scene() {
   const pairData = useStore((s) => s.pairData);
   const inertial = useStore((s) => s.inertial);
 
+  // What the reconstruction found out about the arc, reported back up so the
+  // bodies can be placed at the epoch of closest approach.
+  const [report, setReport] = useState(null);
+
   const { depOrbit, arrOrbit, row } = useMemo(() => {
     const s = useStore.getState();
     if (!s.pairData) return {};
@@ -691,22 +786,43 @@ export default function Scene() {
    *
    * Both orbits start at their own beginning — phase 0, the stored initial
    * condition — never at the burn, so what is drawn is the orbit itself rather
-   * than a segment starting at an arbitrary point on it. The clock starts at
-   * the departure burn in either case; only the duration changes:
+   * than a segment starting at an arbitrary point on it. Duration:
    *
    *   TOF longer than the longest period  -> both run for one TOF
    *   otherwise                           -> each runs for its own period,
    *                                          and the transfer for its TOF
+   *
+   * What makes the picture join up is the clock, not the start point. Every
+   * curve is the rotating-frame trajectory turned by theta = t on ONE clock
+   * whose zero is the departure burn, so a point that is shared in the rotating
+   * frame is shared in the inertial one. An orbit's own time s therefore maps to
+   * s - (phase time of its burn), which is exactly the epoch below: the
+   * departure orbit starts a phase-time before zero and the arrival orbit is
+   * placed so its burn falls at t = TOF. Stamping both with t0 = 0 instead is
+   * what pulled the impulses off the orbits.
    */
   const windows = useMemo(() => {
     if (!row?.TOF) return { dep: null, arr: null };
     const longest = Math.max(depOrbit?.period ?? 0, arrOrbit?.period ?? 0);
     const long = row.TOF > longest;
     return {
-      dep: { phase: null, duration: long ? row.TOF : (depOrbit?.period ?? row.TOF), t0: 0 },
-      arr: { phase: null, duration: long ? row.TOF : (arrOrbit?.period ?? row.TOF), t0: 0 },
+      // Forward from the orbit's own beginning, with the burn falling at its
+      // phase fraction along the arc.
+      dep: {
+        phase: null,
+        duration: long ? row.TOF : (depOrbit?.period ?? row.TOF),
+        t0: epochs.dep,
+      },
+      // The mirror image: backwards from the arrival burn, so the arc ends
+      // exactly where the vehicle arrives and the orbit's own start point falls
+      // at the arrival phase fraction back from that end.
+      arr: {
+        phase: row.arrival_phase ?? 0,
+        duration: -(long ? row.TOF : (arrOrbit?.period ?? row.TOF)),
+        t0: row.TOF,
+      },
     };
-  }, [row, depOrbit, arrOrbit]);
+  }, [row, depOrbit, arrOrbit, epochs]);
 
   // With a transfer selected the interesting region is the Earth-Moon corridor;
   // with the whole catalog on screen it is the entire system, including the
@@ -776,7 +892,10 @@ export default function Scene() {
       <directionalLight position={[-3, -2, 4]} intensity={1.5} />
 
       {showGrid && <ReferenceGrid />}
-      <Bodies tof={inertial ? row?.TOF ?? null : null} />
+      <Bodies
+        tof={inertial ? row?.TOF ?? null : null}
+        tClose={inertial ? report?.minMoonTime ?? null : null}
+      />
 
       {/* The sweep is a rotating-frame device: unrolled into inertial space it
           is a smear of unrelated epochs that hides the arcs it is meant to give
@@ -810,7 +929,10 @@ export default function Scene() {
       />
 
       {row && (
-        <Transfer dep={depOrbit} arr={arrOrbit} row={row} color={series.transfer} channel="primary" />
+        <Transfer
+          dep={depOrbit} arr={arrOrbit} row={row}
+          color={series.transfer} channel="primary" onReport={setReport}
+        />
       )}
 
       <CameraRig target={target} zoom={zoom} />
