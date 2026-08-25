@@ -850,13 +850,15 @@ export default function Scene() {
         duration: long ? row.TOF : (depOrbit?.period ?? row.TOF),
         t0: epochs.dep,
       },
-      // The mirror image: backwards from the arrival burn, so the arc ends
-      // exactly where the vehicle arrives and the orbit's own start point falls
-      // at the arrival phase fraction back from that end.
+      // The arrival orbit is drawn the same way — from its own beginning,
+      // forward — and placed on the clock so that its burn falls at t = TOF.
+      // The impulse then sits at the arrival phase fraction along the arc, the
+      // way the departure impulse sits at the departure phase fraction, which
+      // is what makes the two percentages readable off the picture.
       arr: {
-        phase: row.arrival_phase ?? 0,
-        duration: -(long ? row.TOF : (arrOrbit?.period ?? row.TOF)),
-        t0: row.TOF,
+        phase: null,
+        duration: long ? row.TOF : (arrOrbit?.period ?? row.TOF),
+        t0: epochs.arr,
       },
     };
   }, [row, depOrbit, arrOrbit, epochs]);
